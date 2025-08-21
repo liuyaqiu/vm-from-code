@@ -1,0 +1,2 @@
+instance-id: packer-base-build
+local-hostname: packer-base

@@ -1,0 +1,280 @@
+---
+- name: Create and configure libvirt VMs
+  hosts: libvirt_hosts
+  become: true
+  gather_facts: true
+  
+  vars:
+    vm_config: "{{ hostvars[target_vm] }}"
+    
+  tasks:
+    - name: Install required packages
+      package:
+        name:
+          - libvirt-daemon-system
+          - libvirt-clients
+          - qemu-kvm
+          - qemu-utils
+          - virtinst
+          - virt-manager
+          - bridge-utils
+          - virt-viewer
+        state: present
+      tags: setup
+
+    - name: Ensure libvirtd service is running
+      systemd:
+        name: libvirtd
+        state: started
+        enabled: true
+      tags: setup
+
+    - name: Add current user to libvirt group
+      user:
+        name: "{{ ansible_user_id }}"
+        groups: libvirt
+        append: true
+      tags: setup
+
+    - name: Create base images directory
+      file:
+        path: "{{ base_image_path }}"
+        state: directory
+        mode: '0755'
+      tags: setup
+
+    - name: Create secrets directory
+      file:
+        path: "../secrets"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      become: false
+      tags: setup
+
+    - name: Check if SSH key already exists
+      stat:
+        path: "{{ vm_ssh_key_path }}"
+      delegate_to: localhost
+      become: false
+      register: ssh_key_stat
+      tags: setup
+
+    - name: Generate ed25519 SSH key for VMs
+      command: >
+        ssh-keygen -t ed25519 
+        -f {{ vm_ssh_key_path }} 
+        -N "" 
+        -C "libvirt-vms-key"
+      delegate_to: localhost
+      become: false
+      when: not ssh_key_stat.stat.exists
+      tags: setup
+
+    - name: Display SSH key information
+      debug:
+        msg: |
+          {% if ssh_key_stat.stat.exists %}
+          ✅ SSH key already exists: {{ vm_ssh_key_path }}
+          {% else %}
+          ✅ Generated new SSH key: {{ vm_ssh_key_path }}
+          {% endif %}
+          Public key: {{ vm_ssh_public_key_path }}
+      delegate_to: localhost
+      become: false
+      tags: setup
+
+    - name: Check if static DHCP network needs to be configured
+      community.libvirt.virt_net:
+        command: info
+        name: default
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      register: network_info
+      tags: network
+
+    - name: Setup static DHCP reservations for consistent IP assignments
+      block:
+        - name: Stop default network
+          community.libvirt.virt_net:
+            command: destroy
+            name: default
+            uri: "{{ libvirt_uri | default('qemu:///system') }}"
+          ignore_errors: true
+
+        - name: Undefine existing default network
+          community.libvirt.virt_net:
+            command: undefine
+            name: default
+            uri: "{{ libvirt_uri | default('qemu:///system') }}"
+
+        - name: Define updated default network with static DHCP reservations
+          community.libvirt.virt_net:
+            command: define
+            name: default
+            xml: "{{ lookup('file', 'static-network.xml') }}"
+            uri: "{{ libvirt_uri | default('qemu:///system') }}"
+
+        - name: Start default network with static reservations
+          community.libvirt.virt_net:
+            command: start
+            name: default
+            uri: "{{ libvirt_uri | default('qemu:///system') }}"
+
+        - name: Set default network to autostart
+          community.libvirt.virt_net:
+            autostart: true
+            name: default
+            uri: "{{ libvirt_uri | default('qemu:///system') }}"
+
+        - name: Display static DHCP configuration
+          debug:
+            msg: |
+              ✅ Static DHCP reservations configured:
+              - ubuntu-dev:       192.168.122.10 (MAC: 52:54:00:12:34:10)
+              - ubuntu-test:      192.168.122.20 (MAC: 52:54:00:12:34:20)
+              - ubuntu-cloud-dev: 192.168.122.30 (MAC: 52:54:00:12:34:30)
+              - ubuntu-cloud-test:192.168.122.40 (MAC: 52:54:00:12:34:40)
+              - DHCP range for other VMs: 192.168.122.100-200
+      when: 
+        - network_info is defined
+        - "'52:54:00:12:34:30' not in (network_info.xml | default(''))"
+      tags: network
+
+    - name: Check if source image exists
+      stat:
+        path: "{{ source_image_path }}"
+      register: source_image_stat
+      tags: image
+
+    - name: Copy source image to libvirt images directory
+      copy:
+        src: "{{ source_image_path }}"
+        dest: "{{ base_image_path }}/{{ base_image_name }}"
+        mode: '0644'
+        remote_src: true
+      when: source_image_stat.stat.exists
+      tags: image
+
+    - name: Create VM disk from base image
+      copy:
+        src: "{{ base_image_path }}/{{ base_image_name }}"
+        dest: "{{ base_image_path }}/{{ vm_config.vm_name }}.qcow2"
+        mode: '0644'
+        remote_src: true
+      tags: disk
+
+    - name: Get current disk info
+      command: qemu-img info --output json {{ base_image_path }}/{{ vm_config.vm_name }}.qcow2
+      register: disk_info
+      tags: disk
+
+    - name: Parse disk info
+      set_fact:
+        current_virtual_size: "{{ (disk_info.stdout | from_json)['virtual-size'] }}"
+        target_size_bytes: "{{ vm_config.vm_disk_size | default(default_vm_disk_size) | regex_replace('G$', '') | int * 1024 * 1024 * 1024 }}"
+      tags: disk
+
+    - name: Resize VM disk (only if target is larger)
+      command: >
+        qemu-img resize 
+        {{ base_image_path }}/{{ vm_config.vm_name }}.qcow2 
+        {{ vm_config.vm_disk_size | default(default_vm_disk_size) }}
+      when: target_size_bytes | int > current_virtual_size | int
+      tags: disk
+
+    - name: Display disk size info
+      debug:
+        msg: |
+          Current virtual size: {{ (current_virtual_size | int / 1024 / 1024 / 1024) | round(1) }}G
+          Target size: {{ vm_config.vm_disk_size | default(default_vm_disk_size) }}
+          {% if target_size_bytes | int > current_virtual_size | int %}
+          ✅ Disk will be resized to {{ vm_config.vm_disk_size | default(default_vm_disk_size) }}
+          {% else %}
+          ℹ️  Disk size unchanged (target not larger than current)
+          {% endif %}
+      tags: disk
+
+    - name: Create cloud-init config directory for VM
+      file:
+        path: "/tmp/cloud-init-{{ vm_config.vm_name }}"
+        state: directory
+        mode: '0755'
+      tags: cloud-init
+
+    - name: Read SSH public key content
+      slurp:
+        src: "{{ vm_ssh_public_key_path }}"
+      register: ssh_public_key_content
+      delegate_to: localhost
+      become: false
+      tags: cloud-init
+
+    - name: Set SSH key content for VM configuration
+      set_fact:
+        vm_config: "{{ vm_config | combine({'vm_ssh_key': ssh_public_key_content.content | b64decode | trim}) }}"
+      tags: cloud-init
+
+    - name: Generate cloud-init user-data for VM with static IP
+      template:
+        src: user-data.j2
+        dest: "/tmp/cloud-init-{{ vm_config.vm_name }}/user-data"
+        mode: '0644'
+      tags: cloud-init
+
+    - name: Generate cloud-init meta-data for VM
+      template:
+        src: meta-data.j2
+        dest: "/tmp/cloud-init-{{ vm_config.vm_name }}/meta-data"
+        mode: '0644'
+      tags: cloud-init
+
+    - name: Create cloud-init ISO for VM
+      command: >
+        genisoimage -output /var/lib/libvirt/images/{{ vm_config.vm_name }}-cloud-init.iso 
+        -volid cidata -joliet -r 
+        /tmp/cloud-init-{{ vm_config.vm_name }}/user-data 
+        /tmp/cloud-init-{{ vm_config.vm_name }}/meta-data
+      tags: cloud-init
+
+    - name: Generate VM XML configuration
+      template:
+        src: vm-config.xml.j2
+        dest: "/tmp/{{ vm_config.vm_name }}.xml"
+        mode: '0644'
+      tags: xml
+
+    - name: Define VM
+      community.libvirt.virt:
+        command: define
+        xml: "{{ lookup('file', '/tmp/' + vm_config.vm_name + '.xml') }}"
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      tags: define
+
+    - name: Set VM autostart
+      community.libvirt.virt:
+        name: "{{ vm_config.vm_name }}"
+        autostart: "{{ vm_config.vm_autostart | default(false) }}"
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      tags: autostart
+
+    - name: Start VM
+      community.libvirt.virt:
+        name: "{{ vm_config.vm_name }}"
+        state: running
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      tags: start
+
+    - name: Get VM IP address
+      community.libvirt.virt:
+        command: list_vms
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      register: vm_list
+      tags: info
+
+    - name: Display VM information
+      debug:
+        msg: |
+          VM '{{ vm_config.vm_name }}' has been created and started.
+          Connect via VNC: virt-viewer {{ vm_config.vm_name }}
+          Or use SSH once the VM is fully booted: ssh {{ vm_ssh_user }}@<VM_IP>
+      tags: info

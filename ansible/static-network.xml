@@ -1,0 +1,21 @@
+<network>
+  <name>default</name>
+  <uuid>0bacd75c-0e93-491a-8e8b-d98d006520d7</uuid>
+  <forward mode='nat'>
+    <nat>
+      <port start='1024' end='65535'/>
+    </nat>
+  </forward>
+  <bridge name='virbr0' stp='on' delay='0'/>
+  <mac address='52:54:00:79:17:86'/>
+  <ip address='192.168.122.1' netmask='255.255.255.0'>
+    <dhcp>
+      <range start='192.168.122.100' end='192.168.122.200'/>
+      <!-- Static DHCP reservations for VMs -->
+      <host mac='52:54:00:12:34:10' name='ubuntu-dev' ip='192.168.122.10'/>
+      <host mac='52:54:00:12:34:20' name='ubuntu-test' ip='192.168.122.20'/>
+      <host mac='52:54:00:12:34:30' name='ubuntu-cloud-dev' ip='192.168.122.30'/>
+      <host mac='52:54:00:12:34:40' name='ubuntu-cloud-test' ip='192.168.122.40'/>
+    </dhcp>
+  </ip>
+</network>

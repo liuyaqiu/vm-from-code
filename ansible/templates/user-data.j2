@@ -1,0 +1,80 @@
+#cloud-config
+# DEPLOYMENT-TIME cloud-init configuration for clean Packer-built base image
+# This VM uses a base image with reset cloud-init state, so we can configure cleanly
+
+# Set hostname for this deployment
+hostname: {{ vm_config.vm_hostname | default(vm_config.vm_name) }}
+fqdn: {{ vm_config.vm_hostname | default(vm_config.vm_name) }}.local
+
+# User configuration (vagrant user exists from base image, ensure password login works)
+users:
+  - name: vagrant
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: sudo
+    shell: /bin/bash
+    lock_passwd: false
+    # Keep the password: vagrant (hashed)
+    passwd: $6$R4BhFdKhYX9qD9lS$7dpmvCiT70Rici8D.3M2uMYD0AeOBrP49UnUvHesqMgPARjQoMxJx2DX/Ax2CaeVxU03qyjT.wMRPAjkEYO2l0
+    ssh_authorized_keys:
+      - {{ vm_config.vm_ssh_key }}
+
+# SSH configuration - ensure password authentication is enabled
+ssh_pwauth: true
+disable_root: true
+
+# Network configuration using cloud-init standard method
+network:
+  config: disabled
+
+# Write deployment-specific files
+write_files:
+  - path: /etc/motd
+    content: |
+      Welcome to {{ vm_config.vm_name }}
+      
+      This VM was deployed with:
+      - Static IP: {{ vm_config.vm_static_ip | default('192.168.122.30') }}
+      - Memory: {{ vm_config.vm_memory | default('2048') }}MB
+      - CPUs: {{ vm_config.vm_vcpus | default('2') }}
+      
+      Login: ssh vagrant@{{ vm_config.vm_static_ip | default('192.168.122.30') }}
+      Password: vagrant
+      
+      Built with Packer + Ansible cloud-init workflow
+    permissions: '0644'
+  - path: /etc/ssh/sshd_config.d/50-vagrant-password-auth.conf
+    content: |
+      # Enable password authentication for vagrant user
+      PasswordAuthentication yes
+      PubkeyAuthentication yes
+      AuthorizedKeysFile %h/.ssh/authorized_keys
+      PermitRootLogin no
+    permissions: '0644'
+
+
+{% if vm_config.vm_packages is defined %}
+# Install deployment-specific packages
+packages:
+{% for package in vm_config.vm_packages %}
+  - {{ package }}
+{% endfor %}
+{% endif %}
+
+# Deployment-specific commands
+runcmd:
+  - echo "=== Cloud-init configuration complete ==="
+  - echo "Deployment cloud-init completed for {{ vm_config.vm_name }}"
+  - echo "Static IP configured: {{ vm_config.vm_static_ip | default('192.168.122.30') }}"
+  - echo "Password authentication enabled for vagrant user"
+  - systemctl restart ssh
+
+# Final message
+final_message: |
+  {{ vm_config.vm_name }} deployment completed successfully!
+  
+  Connection details:
+  - SSH: ssh vagrant@{{ vm_config.vm_static_ip | default('192.168.122.30') }}
+  - Password: vagrant
+  - Static IP: {{ vm_config.vm_static_ip | default('192.168.122.30') }}
+  
+  This VM was deployed from a clean Packer base image.

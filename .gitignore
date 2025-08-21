@@ -1,0 +1,117 @@
+# Packer build outputs
+builds/
+output/
+output-*/
+packer_cache/
+.packer.d/
+
+# VM images and disk files
+*.box
+*.vmdk
+*.vdi
+*.qcow2
+*.img
+*.iso
+
+# VirtualBox specific
+*.vbox
+*.vbox-prev
+.vagrant/
+*.log
+
+# Vagrant files
+.vagrant/
+vagrant-test/
+
+# SSH keys and secrets
+secrets/
+*.key
+*.pem
+*_rsa
+*_rsa.pub
+*_ed25519
+*_ed25519.pub
+*.ppk
+
+# Temporary files
+*.tmp
+*.temp
+*~
+.#*
+\#*#
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.project
+.settings/
+
+# Logs
+*.log
+logs/
+packer-debug.log
+
+# Backup files
+*.bak
+*.backup
+*.orig
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+
+# Node.js (if any JS tooling is added)
+node_modules/
+npm-debug.log*
+
+# Terraform state (if Terraform is used)
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Ansible
+*.retry
+.ansible/
+
+# Compression archives
+*.7z
+*.dmg
+*.gz
+*.iso
+*.jar
+*.rar
+*.tar
+*.zip
+
+# Test artifacts
+test-results/
+coverage/
+
+# Local configuration overrides
+local.pkrvars.hcl
+*.local.pkrvars.hcl
+config.local.*

@@ -1,0 +1,41 @@
+#cloud-config
+# Minimal cloud-init configuration for Packer build
+# Creates vagrant user for Packer SSH access, but NO SSH keys
+# NO network configuration - will be handled during deployment
+
+# This creates a minimal base image for Packer provisioning
+
+# Minimal user configuration for Packer build process
+# Packer needs vagrant user to SSH during build, but no SSH keys
+users:
+  - default
+  - name: vagrant
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    groups: sudo
+    shell: /bin/bash
+    lock_passwd: false
+    # Password: vagrant (for Packer SSH access during build)
+    passwd: $6$R4BhFdKhYX9qD9lS$7dpmvCiT70Rici8D.3M2uMYD0AeOBrP49UnUvHesqMgPARjQoMxJx2DX/Ax2CaeVxU03qyjT.wMRPAjkEYO2l0
+    # No SSH keys in base image - will be added during deployment
+
+# Enable password authentication for SSH (required for Packer build)
+ssh_pwauth: true
+
+# Package updates and installs (minimal for build)
+package_update: true
+package_upgrade: false  # Let provision.sh handle upgrades to avoid conflicts
+packages:
+  - curl
+  - wget
+  - vim
+  - git
+  - net-tools
+  - iputils-ping
+  - openssh-server
+  - build-essential
+
+# No SSH configuration files in base image - let deployment handle this
+
+# Run commands after boot
+runcmd:
+  - echo "Packer build cloud-init setup completed - will be reset after build"

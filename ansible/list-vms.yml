@@ -1,0 +1,66 @@
+---
+- name: List and get information about libvirt VMs
+  hosts: libvirt_hosts
+  become: true
+  gather_facts: false
+  
+  tasks:
+    - name: Get list of all VMs
+      community.libvirt.virt:
+        command: list_vms
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      register: all_vms
+      tags: list
+
+    - name: Get running VMs
+      community.libvirt.virt:
+        command: list_vms
+        state: running
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      register: running_vms
+      tags: list
+
+    - name: Get VM info for each VM
+      community.libvirt.virt:
+        command: info
+        name: "{{ item }}"
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      register: vm_details
+      loop: "{{ all_vms.list_vms }}"
+      when: all_vms.list_vms | length > 0
+      tags: details
+
+    - name: Display VM summary
+      debug:
+        msg: |
+          Total VMs: {{ all_vms.list_vms | length }}
+          Running VMs: {{ running_vms.list_vms | length }}
+          
+          VM Details:
+          {% for vm in vm_details.results %}
+          - {{ vm.item }}: {{ vm.status | default('unknown') }}
+          {% endfor %}
+      when: all_vms.list_vms | length > 0
+      tags: summary
+
+    - name: Display message when no VMs exist
+      debug:
+        msg: "No VMs found in libvirt."
+      when: all_vms.list_vms | length == 0
+      tags: summary
+
+    - name: Get network information
+      community.libvirt.virt_net:
+        command: list_nets
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      register: networks
+      tags: network
+
+    - name: Display network information
+      debug:
+        msg: |
+          Available networks:
+          {% for net in networks.list_nets %}
+          - {{ net }}
+          {% endfor %}
+      tags: network

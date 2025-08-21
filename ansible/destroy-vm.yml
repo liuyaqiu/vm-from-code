@@ -1,0 +1,80 @@
+---
+- name: Destroy libvirt VMs
+  hosts: libvirt_hosts
+  become: true
+  gather_facts: false
+  
+  vars:
+    vm_config: "{{ hostvars[target_vm] }}"
+    
+  tasks:
+    - name: Check if VM exists
+      community.libvirt.virt:
+        command: info
+        name: "{{ vm_config.vm_name }}"
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      register: vm_info
+      ignore_errors: true
+      tags: check
+
+    - name: Stop VM if running
+      community.libvirt.virt:
+        name: "{{ vm_config.vm_name }}"
+        state: shutdown
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      when: vm_info is succeeded and vm_info.status != 'shutdown'
+      ignore_errors: true
+      tags: stop
+
+    - name: Force destroy VM if shutdown fails
+      community.libvirt.virt:
+        name: "{{ vm_config.vm_name }}"
+        state: destroyed
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      when: vm_info is succeeded
+      ignore_errors: true
+      tags: destroy
+
+    - name: Undefine VM
+      community.libvirt.virt:
+        command: undefine
+        name: "{{ vm_config.vm_name }}"
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      when: vm_info is succeeded
+      ignore_errors: true
+      tags: undefine
+
+    - name: Remove VM disk
+      file:
+        path: "{{ base_image_path }}/{{ vm_config.vm_name }}.qcow2"
+        state: absent
+      tags: cleanup
+
+    - name: Remove cloud-init ISO
+      file:
+        path: "{{ base_image_path }}/{{ vm_config.vm_name }}-cloud-init.iso"
+        state: absent
+      tags: cleanup
+
+    - name: Remove VM XML configuration
+      file:
+        path: "/tmp/{{ vm_config.vm_name }}.xml"
+        state: absent
+      tags: cleanup
+
+    - name: Remove base image (only when explicitly requested)
+      file:
+        path: "{{ base_image_path }}/{{ base_image_name }}"
+        state: absent
+      tags: cleanup
+
+    - name: Display destruction status
+      debug:
+        msg: "VM '{{ vm_config.vm_name }}' has been destroyed and cleaned up."
+      tags: info
+      
+    - name: Display base image cleanup info
+      debug:
+        msg: "Base image '{{ base_image_name }}' was also removed."
+      when: cleanup_base_image | default(false) | bool
+      tags: info

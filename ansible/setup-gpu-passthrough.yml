@@ -1,0 +1,97 @@
+---
+- name: Setup GPU passthrough for libvirt
+  hosts: libvirt_hosts
+  become: true
+  gather_facts: true
+  
+  tasks:
+    - name: Check if Intel VT-d or AMD IOMMU is enabled
+      shell: |
+        if grep -q "Intel" /proc/cpuinfo; then
+          dmesg | grep -i "DMAR: IOMMU enabled"
+        else
+          dmesg | grep -i "AMD-Vi: Found IOMMU"
+        fi
+      register: iommu_check
+      ignore_errors: true
+      tags: check
+
+    - name: Display IOMMU status
+      debug:
+        msg: |
+          IOMMU Status: {{ 'Enabled' if iommu_check.rc == 0 else 'Disabled' }}
+          {% if iommu_check.rc != 0 %}
+          Please enable IOMMU in BIOS and add intel_iommu=on (Intel) or amd_iommu=on (AMD) to kernel parameters.
+          {% endif %}
+      tags: check
+
+    - name: List available GPU devices
+      shell: lspci -nn | grep -i vga
+      register: gpu_devices
+      tags: info
+
+    - name: Display available GPUs
+      debug:
+        msg: |
+          Available GPU devices:
+          {{ gpu_devices.stdout }}
+      tags: info
+
+    - name: Get GPU device details
+      shell: lspci -vnn | grep -A 10 -i vga
+      register: gpu_details
+      tags: info
+
+    - name: Install VFIO packages
+      package:
+        name:
+          - qemu-kvm
+          - libvirt-daemon-system
+          - virt-manager
+        state: present
+      tags: setup
+
+    - name: Load VFIO modules
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ vfio_modules }}"
+      tags: setup
+
+    - name: Add VFIO modules to startup
+      lineinfile:
+        path: /etc/modules-load.d/vfio.conf
+        line: "{{ item }}"
+        create: true
+      loop: "{{ vfio_modules }}"
+      tags: setup
+
+    - name: Create VFIO configuration for specific GPU (if specified)
+      lineinfile:
+        path: /etc/modprobe.d/vfio.conf
+        line: "options vfio-pci ids={{ gpu_device_vendor_id }}:{{ gpu_device_product_id }}"
+        create: true
+      when: 
+        - gpu_device_vendor_id is defined
+        - gpu_device_product_id is defined
+      tags: setup
+
+    - name: Update initramfs
+      command: update-initramfs -u
+      tags: setup
+
+    - name: Display next steps
+      debug:
+        msg: |
+          GPU passthrough setup steps completed.
+          
+          Next steps:
+          1. Find your GPU's PCI ID: lspci -nn | grep -i vga
+          2. Note the device ID (format: vendor:device, e.g., 10de:1b80)
+          3. Add it to GRUB: GRUB_CMDLINE_LINUX="intel_iommu=on vfio-pci.ids=10de:1b80"
+          4. Update GRUB: update-grub
+          5. Reboot the system
+          6. Verify: lspci -k | grep -A 3 -i vga
+          7. Update inventory.yml with the correct gpu_device_id
+          8. Create VMs with gpu_passthrough: true
+      tags: info

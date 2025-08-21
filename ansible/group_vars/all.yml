@@ -1,0 +1,39 @@
+---
+# Default settings for all VMs
+# These can be overridden in inventory.yml for each VM
+default_vm_memory: 2048
+default_vm_vcpus: 2
+default_vm_disk_size: "40G"
+default_vm_network: "default"
+default_vm_os_variant: "ubuntu24.04"
+default_vm_gateway: "192.168.122.1"
+default_vm_dns: ["192.168.122.1", "8.8.8.8"]
+
+# Base image settings (updated for clean Packer cloud image)
+base_image_path: "/var/lib/libvirt/images"
+base_image_name: "ubuntu-24.04-cloud-base.qcow2"
+# Use the clean Packer-built libvirt image with reset cloud-init state
+source_image_path: "../builds/ubuntu-24.04-libvirt.qcow2"
+
+# SSH settings
+vm_ssh_user: "vagrant"
+vm_ssh_password: "vagrant"
+vm_ssh_key_path: "../secrets/libvirt_vms_ed25519"
+vm_ssh_public_key_path: "../secrets/libvirt_vms_ed25519.pub"
+
+# Network settings
+libvirt_networks:
+  - name: "default"
+    bridge: "virbr0"
+  - name: "isolated"
+    isolated: true
+    dhcp_range_start: "192.168.100.2"
+    dhcp_range_end: "192.168.100.254"
+
+# GPU passthrough settings
+gpu_passthrough_enabled: false
+vfio_modules:
+  - vfio
+  - vfio_iommu_type1
+  - vfio_pci
+  - vfio_virqfd
