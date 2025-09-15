@@ -1,97 +1,491 @@
 ---
-- name: Setup GPU passthrough for libvirt
+- name: Setup NVIDIA GPU passthrough for libvirt (Safe automation with manual critical steps)
   hosts: libvirt_hosts
   become: true
   gather_facts: true
   
+  vars:
+    vfio_modules:
+      - vfio
+      - vfio_iommu_type1
+      - vfio_pci
+      - vfio_virqfd
+
   tasks:
-    - name: Check if Intel VT-d or AMD IOMMU is enabled
+    # ========================================
+    # STEP 1: Platform Detection
+    # ========================================
+    - name: Detect CPU platform (Intel vs AMD)
       shell: |
         if grep -q "Intel" /proc/cpuinfo; then
+          echo "intel"
+        elif grep -q "AMD" /proc/cpuinfo; then
+          echo "amd"
+        else
+          echo "unknown"
+        fi
+      register: cpu_platform
+      changed_when: false
+      tags: [check, platform]
+
+    - name: Display CPU platform information
+      pause:
+        seconds: 3
+        prompt: |
+          Detected CPU Platform: {{ cpu_platform.stdout | upper }}
+          
+          BIOS Requirements for {{ cpu_platform.stdout | upper }}:
+          {% if cpu_platform.stdout == "amd" %}
+          - Enable AMD IOMMU or SVM Mode in BIOS/UEFI
+          - Disable Secure Boot (recommended)
+          - Enable CPU Virtualization features
+          {% elif cpu_platform.stdout == "intel" %}
+          - Enable Intel VT-d in BIOS/UEFI
+          - Disable Secure Boot (recommended)
+          - Enable CPU Virtualization features (VT-x)
+          {% endif %}
+      tags: [check, platform]
+
+    # ========================================
+    # STEP 2: Current IOMMU Status Check
+    # ========================================
+    - name: Check current IOMMU status
+      shell: |
+        if {{ cpu_platform.stdout == "intel" }}; then
           dmesg | grep -i "DMAR: IOMMU enabled"
         else
-          dmesg | grep -i "AMD-Vi: Found IOMMU"
+          dmesg | grep -i "AMD-Vi: Found IOMMU\|AMD-Vi: AMD IOMMU Enabled"
         fi
-      register: iommu_check
+      register: iommu_status
       ignore_errors: true
-      tags: check
+      changed_when: false
+      tags: [check, iommu]
 
-    - name: Display IOMMU status
-      debug:
-        msg: |
-          IOMMU Status: {{ 'Enabled' if iommu_check.rc == 0 else 'Disabled' }}
-          {% if iommu_check.rc != 0 %}
-          Please enable IOMMU in BIOS and add intel_iommu=on (Intel) or amd_iommu=on (AMD) to kernel parameters.
+    - name: Display current IOMMU status
+      pause:
+        seconds: 2
+        prompt: |
+          Current IOMMU Status: {{ 'Enabled' if iommu_status.rc == 0 else 'Disabled or Not Configured' }}
+          {% if iommu_status.rc != 0 %}
+          ⚠️  IOMMU needs to be enabled in BIOS and kernel parameters!
           {% endif %}
-      tags: check
+      tags: [check, iommu]
 
-    - name: List available GPU devices
-      shell: lspci -nn | grep -i vga
-      register: gpu_devices
-      tags: info
+    # ========================================
+    # STEP 3: GPU Device Discovery
+    # ========================================
+    - name: Discover all GPU devices
+      shell: lspci -nn | grep -E "VGA|3D|Display"
+      register: all_gpus
+      changed_when: false
+      tags: [info, gpu]
 
-    - name: Display available GPUs
-      debug:
-        msg: |
-          Available GPU devices:
-          {{ gpu_devices.stdout }}
-      tags: info
+    - name: Discover NVIDIA GPU devices specifically
+      shell: lspci -nn | grep -i nvidia
+      register: nvidia_gpus
+      ignore_errors: true
+      changed_when: false
+      tags: [info, gpu]
 
-    - name: Get GPU device details
-      shell: lspci -vnn | grep -A 10 -i vga
-      register: gpu_details
-      tags: info
+    - name: Parse NVIDIA GPU device details
+      shell: |
+        lspci -nn | grep -i nvidia | head -1 | sed -E 's/.*\[([0-9a-f]{4}):([0-9a-f]{4})\].*/\1:\2/'
+      register: nvidia_device_id
+      when: nvidia_gpus.rc == 0
+      changed_when: false
+      tags: [info, gpu]
 
-    - name: Install VFIO packages
+    - name: Get detailed GPU information
+      shell: lspci -vnn | grep -A 15 -i nvidia
+      register: nvidia_detail
+      when: nvidia_gpus.rc == 0
+      changed_when: false
+      tags: [info, gpu]
+
+    - name: Display GPU discovery results
+      pause:
+        seconds: 3
+        prompt: |
+          ===== GPU DISCOVERY RESULTS =====
+          All GPU devices found:
+          {{ all_gpus.stdout }}
+          
+          {% if nvidia_gpus.rc == 0 %}
+          NVIDIA GPUs found:
+          {{ nvidia_gpus.stdout }}
+          
+          Primary NVIDIA Device ID: {{ nvidia_device_id.stdout | default('Not detected') }}
+          {% else %}
+          ⚠️  No NVIDIA GPUs detected!
+          {% endif %}
+      tags: [info, gpu]
+
+    # ========================================
+    # STEP 4: Current Driver Status Check
+    # ========================================
+    - name: Check current NVIDIA driver installation
+      shell: |
+        dpkg -l | grep -E "nvidia-driver|nvidia-[0-9]"
+      register: nvidia_driver_check
+      ignore_errors: true
+      changed_when: false
+      tags: [check, drivers]
+
+    - name: Check nouveau driver status
+      shell: lsmod | grep nouveau
+      register: nouveau_status
+      ignore_errors: true
+      changed_when: false
+      tags: [check, drivers]
+
+    - name: Display current driver status
+      pause:
+        seconds: 2
+        prompt: |
+          ===== DRIVER STATUS =====
+          NVIDIA Proprietary Driver: {{ 'Installed' if nvidia_driver_check.rc == 0 else 'Not Installed' }}
+          Nouveau Open Source Driver: {{ 'Loaded' if nouveau_status.rc == 0 else 'Not Loaded' }}
+          
+          {% if nvidia_driver_check.rc == 0 %}
+          ⚠️  WARNING: NVIDIA proprietary drivers are installed!
+          These must be removed before GPU passthrough.
+          {% endif %}
+          
+          {% if nouveau_status.rc == 0 %}
+          ℹ️  Nouveau driver is active and needs to be disabled for passthrough.
+          {% endif %}
+      tags: [check, drivers]
+
+    # ========================================
+    # STEP 5: Generate GRUB Configuration (Manual Step)
+    # ========================================
+    - name: Generate GRUB kernel parameters
+      set_fact:
+        grub_params: |
+          {% if cpu_platform.stdout == "amd" %}
+          amd_iommu=on iommu=pt{% if nvidia_device_id.stdout is defined %} vfio-pci.ids={{ nvidia_device_id.stdout }}{% endif %}
+          {% elif cpu_platform.stdout == "intel" %}
+          intel_iommu=on iommu=pt{% if nvidia_device_id.stdout is defined %} vfio-pci.ids={{ nvidia_device_id.stdout }}{% endif %}
+          {% endif %}
+      when: nvidia_device_id.stdout is defined
+      tags: [config, grub]
+
+    - name: Display GRUB configuration instructions
+      pause:
+        prompt: |
+          ===== CRITICAL: GRUB CONFIGURATION (MANUAL STEP) =====
+          
+          You need to manually update your GRUB configuration:
+          
+          1. Edit GRUB configuration:
+             sudo vim /etc/default/grub
+          
+          2. Find the line starting with GRUB_CMDLINE_LINUX_DEFAULT
+          
+          3. Add these parameters to the line:
+             {{ grub_params | trim }}
+          
+          4. Your line should look similar to:
+             GRUB_CMDLINE_LINUX_DEFAULT="quiet splash {{ grub_params | trim }}"
+          
+          5. Update GRUB (CRITICAL - MANUAL EXECUTION REQUIRED):
+             sudo update-grub
+          
+          6. Update initramfs (CRITICAL - MANUAL EXECUTION REQUIRED):
+             sudo update-initramfs -u
+          
+          7. Reboot the system:
+             sudo reboot
+          
+          ⚠️  These commands modify critical system boot configuration!
+          ⚠️  Please execute them manually and ensure you understand the changes!
+          
+          Press ENTER when you have read and understood these instructions...
+      when: nvidia_device_id.stdout is defined
+      tags: [config, grub]
+
+    # ========================================
+    # STEP 6: Generate Driver Removal Commands (Manual Steps)
+    # ========================================
+    - name: Display NVIDIA driver removal instructions
+      pause:
+        prompt: |
+          ===== NVIDIA DRIVER REMOVAL (MANUAL STEPS) =====
+          
+          {% if nvidia_driver_check.rc == 0 %}
+          NVIDIA proprietary drivers detected! Remove them with:
+          
+          1. Remove NVIDIA packages:
+             sudo apt remove --purge nvidia-* libnvidia-*
+             sudo apt autoremove
+          
+          2. Reboot after removal:
+             sudo reboot
+          
+          Press ENTER when you have completed driver removal and rebooted...
+          {% else %}
+          ✅ No NVIDIA proprietary drivers detected - good for passthrough!
+          
+          Press ENTER to continue...
+          {% endif %}
+      tags: [config, drivers]
+
+    - name: Generate nouveau blacklist configuration
+      copy:
+        content: |
+          # Blacklist nouveau driver for GPU passthrough
+          blacklist nouveau
+          options nouveau modeset=0
+        dest: /etc/modprobe.d/blacklist-nouveau.conf
+        backup: true
+      tags: [config, drivers]
+
+    - name: Display nouveau blacklist instructions
+      pause:
+        seconds: 2
+        prompt: |
+          ===== NOUVEAU DRIVER BLACKLIST =====
+          
+          ✅ Created: /etc/modprobe.d/blacklist-nouveau.conf
+          
+          {% if nouveau_status.rc == 0 %}
+          Nouveau is currently active. After GRUB update and reboot, verify it's disabled with:
+          lsmod | grep nouveau
+          {% else %}
+          ✅ Nouveau driver is not currently loaded.
+          {% endif %}
+      tags: [config, drivers]
+
+    # ========================================
+    # STEP 7: VFIO Module Configuration (Safe to Automate)
+    # ========================================
+    - name: Create VFIO modules configuration
+      copy:
+        content: |
+          # VFIO modules for GPU passthrough
+          {% for module in vfio_modules %}
+          {{ module }}
+          {% endfor %}
+        dest: /etc/modules-load.d/vfio.conf
+        backup: true
+      tags: [config, vfio]
+
+    - name: Load VFIO modules (if not already loaded)
+      modprobe:
+        name: "{{ item }}"
+        state: present
+      loop: "{{ vfio_modules }}"
+      ignore_errors: true
+      tags: [config, vfio]
+
+    - name: Check VFIO module loading status
+      shell: lsmod | grep vfio
+      register: vfio_loaded
+      ignore_errors: true
+      changed_when: false
+      tags: [check, vfio]
+
+    - name: Display VFIO module status
+      pause:
+        seconds: 2
+        prompt: |
+          ===== VFIO MODULE CONFIGURATION =====
+          
+          ✅ Created: /etc/modules-load.d/vfio.conf
+          
+          Current VFIO modules loaded:
+          {% if vfio_loaded.rc == 0 %}
+          {{ vfio_loaded.stdout }}
+          {% else %}
+          ⚠️  No VFIO modules currently loaded (expected before reboot)
+          {% endif %}
+      tags: [check, vfio]
+
+    # ========================================
+    # STEP 8: Install Required Packages (Safe to Automate)
+    # ========================================
+    - name: Install required virtualization packages
       package:
         name:
           - qemu-kvm
           - libvirt-daemon-system
           - virt-manager
+          - bridge-utils
+          - cpu-checker
         state: present
-      tags: setup
+        update_cache: true
+      tags: [setup, packages]
 
-    - name: Load VFIO modules
-      modprobe:
-        name: "{{ item }}"
-        state: present
-      loop: "{{ vfio_modules }}"
-      tags: setup
+    # ========================================
+    # STEP 9: Automated System Validation
+    # ========================================
+    - name: Check kernel command line parameters
+      shell: cat /proc/cmdline
+      register: kernel_cmdline
+      changed_when: false
+      tags: [validation]
 
-    - name: Add VFIO modules to startup
-      lineinfile:
-        path: /etc/modules-load.d/vfio.conf
-        line: "{{ item }}"
-        create: true
-      loop: "{{ vfio_modules }}"
-      tags: setup
+    - name: Verify IOMMU enablement
+      shell: |
+        {% if cpu_platform.stdout == "amd" %}
+        dmesg | grep -i "AMD-Vi: AMD IOMMU Enabled"
+        {% else %}
+        dmesg | grep -i "DMAR: IOMMU enabled"
+        {% endif %}
+      register: iommu_validation
+      ignore_errors: true
+      changed_when: false
+      tags: [validation]
 
-    - name: Create VFIO configuration for specific GPU (if specified)
-      lineinfile:
-        path: /etc/modprobe.d/vfio.conf
-        line: "options vfio-pci ids={{ gpu_device_vendor_id }}:{{ gpu_device_product_id }}"
-        create: true
-      when: 
-        - gpu_device_vendor_id is defined
-        - gpu_device_product_id is defined
-      tags: setup
+    - name: Check VFIO modules status
+      shell: lsmod | grep vfio
+      register: vfio_validation
+      ignore_errors: true
+      changed_when: false
+      tags: [validation]
 
-    - name: Update initramfs
-      command: update-initramfs -u
-      tags: setup
+    - name: Verify GPU driver binding
+      shell: lspci -k | grep -EA3 'VGA|3D|Display'
+      register: gpu_driver_validation
+      changed_when: false
+      tags: [validation]
 
-    - name: Display next steps
-      debug:
-        msg: |
-          GPU passthrough setup steps completed.
+    - name: Check IOMMU groups
+      shell: find /sys/kernel/iommu_groups/ -type l | sort -V
+      register: iommu_groups
+      ignore_errors: true
+      changed_when: false
+      tags: [validation]
+
+    - name: Get GPU IOMMU group
+      shell: |
+        GPU_PCI=$(lspci | grep -i nvidia | head -1 | cut -d' ' -f1)
+        if [ -n "$GPU_PCI" ]; then
+          readlink /sys/bus/pci/devices/0000:$GPU_PCI/iommu_group 2>/dev/null || echo "Not found"
+        else
+          echo "No NVIDIA GPU detected"
+        fi
+      register: gpu_iommu_group
+      ignore_errors: true
+      changed_when: false
+      tags: [validation]
+
+    - name: Check nouveau driver status
+      shell: lsmod | grep nouveau
+      register: nouveau_validation
+      ignore_errors: true
+      changed_when: false
+      tags: [validation]
+
+    - name: Display validation results
+      pause:
+        prompt: |
+          ===== AUTOMATED VALIDATION RESULTS =====
           
-          Next steps:
-          1. Find your GPU's PCI ID: lspci -nn | grep -i vga
-          2. Note the device ID (format: vendor:device, e.g., 10de:1b80)
-          3. Add it to GRUB: GRUB_CMDLINE_LINUX="intel_iommu=on vfio-pci.ids=10de:1b80"
-          4. Update GRUB: update-grub
-          5. Reboot the system
-          6. Verify: lspci -k | grep -A 3 -i vga
-          7. Update inventory.yml with the correct gpu_device_id
-          8. Create VMs with gpu_passthrough: true
-      tags: info
+          1. Kernel Command Line:
+          {{ kernel_cmdline.stdout }}
+          {% if grub_params is defined %}
+          Expected parameters: {{ grub_params | trim }}
+          Status: {{ '✅ PASS' if grub_params.strip() in kernel_cmdline.stdout else '❌ MISSING PARAMETERS' }}
+          {% endif %}
+          
+          2. IOMMU Status:
+          {% if iommu_validation.rc == 0 %}
+          ✅ IOMMU ENABLED
+          {{ iommu_validation.stdout }}
+          {% else %}
+          ❌ IOMMU NOT DETECTED
+          {% endif %}
+          
+          3. VFIO Modules:
+          {% if vfio_validation.rc == 0 %}
+          ✅ VFIO MODULES LOADED
+          {{ vfio_validation.stdout }}
+          {% else %}
+          ❌ VFIO MODULES NOT LOADED
+          {% endif %}
+          
+          4. GPU Driver Binding:
+          {{ gpu_driver_validation.stdout }}
+          {% if 'vfio-pci' in gpu_driver_validation.stdout %}
+          ✅ GPU BOUND TO VFIO-PCI
+          {% else %}
+          ❌ GPU NOT BOUND TO VFIO-PCI
+          {% endif %}
+          
+          5. IOMMU Groups:
+          {% if iommu_groups.rc == 0 %}
+          ✅ IOMMU GROUPS DETECTED ({{ iommu_groups.stdout_lines | length }} groups)
+          {% else %}
+          ❌ NO IOMMU GROUPS FOUND
+          {% endif %}
+          
+          6. GPU IOMMU Group:
+          {{ gpu_iommu_group.stdout }}
+          
+          7. Nouveau Driver:
+          {% if nouveau_validation.rc != 0 %}
+          ✅ NOUVEAU NOT LOADED (Good for passthrough)
+          {% else %}
+          ❌ NOUVEAU STILL ACTIVE
+          {{ nouveau_validation.stdout }}
+          {% endif %}
+          
+          ===== OVERALL STATUS =====
+          {% set validation_checks = [
+            iommu_validation.rc == 0,
+            vfio_validation.rc == 0,
+            'vfio-pci' in gpu_driver_validation.stdout,
+            nouveau_validation.rc != 0
+          ] %}
+          {% if validation_checks | select | list | length == validation_checks | length %}
+          🎉 ALL CRITICAL CHECKS PASSED - GPU PASSTHROUGH READY!
+          {% else %}
+          ⚠️  SOME CHECKS FAILED - REVIEW CONFIGURATION
+          {% endif %}
+          
+          Press ENTER to continue to final summary...
+      when: nvidia_device_id.stdout is defined
+      tags: [validation]
+
+    # ========================================
+    # STEP 10: Summary and Next Steps
+    # ========================================
+    - name: Display final summary
+      pause:
+        prompt: |
+          ===== SETUP SUMMARY =====
+          
+          Platform: {{ cpu_platform.stdout | upper }}
+          {% if nvidia_device_id.stdout is defined %}
+          Target GPU: {{ nvidia_device_id.stdout }}
+          {% endif %}
+          
+          ===== COMPLETED AUTOMATICALLY =====
+          ✅ Platform detection
+          ✅ GPU device discovery
+          ✅ Driver status check
+          ✅ VFIO modules configuration (/etc/modules-load.d/vfio.conf)
+          ✅ Nouveau blacklist (/etc/modprobe.d/blacklist-nouveau.conf)
+          ✅ Required packages installation
+          
+          ===== MANUAL STEPS REQUIRED =====
+          🔶 Update BIOS settings (enable IOMMU/SVM, disable Secure Boot)
+          {% if nvidia_driver_check.rc == 0 %}
+          🔶 Remove NVIDIA proprietary drivers
+          {% endif %}
+          🔶 Update GRUB configuration with kernel parameters
+          🔶 Run: sudo update-grub
+          🔶 Run: sudo update-initramfs -u
+          🔶 Reboot system
+          🔶 Validate configuration with provided commands
+          
+          ===== SAFETY NOTES =====
+          ⚠️  Critical system configuration changes must be done manually
+          ⚠️  Always backup your system before making kernel/boot changes
+          ⚠️  Ensure you can boot from alternative media if needed
+          
+          After successful validation, you can proceed to create VMs with GPU passthrough!
+          
+          Press ENTER to complete the setup process...
+      tags: [info, summary]
