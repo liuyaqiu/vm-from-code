@@ -19,8 +19,6 @@ packer build ubuntu-24.04.pkr.hcl
 ### **Phase 2: Deploy with Environment-Specific Configuration**
 ```bash
 # In ansible directory
-make cloud-vm                           # Deploy ubuntu-cloud-dev
-make create VM=ubuntu-cloud-test         # Deploy ubuntu-cloud-test
 make create VM=ubuntu-dev                # Deploy ubuntu-dev
 ```
 - Uses templated cloud-init configuration
@@ -41,8 +39,8 @@ make create VM=ubuntu-dev                # Deploy ubuntu-dev
 ### **inventory.yml** (ENHANCED)
 Each VM now has deployment-specific settings:
 ```yaml
-ubuntu-cloud-dev:
-  vm_static_ip: "192.168.122.30"
+ubuntu-dev:
+  vm_static_ip: "192.168.122.10"
   vm_hostname: "ubuntu-dev"
   vm_gateway: "192.168.122.1"
   vm_dns: ["192.168.122.1", "8.8.8.8"]
@@ -62,19 +60,10 @@ ubuntu-cloud-dev:
 
 ### **Development Environment**
 ```yaml
-ubuntu-cloud-dev:
-  vm_static_ip: "192.168.122.30"
+ubuntu-dev:
+  vm_static_ip: "192.168.122.10"
   vm_memory: 2048
   vm_packages: ["htop", "curl", "wget"]
-```
-
-### **Test Environment**
-```yaml
-ubuntu-cloud-test:
-  vm_static_ip: "192.168.122.40"
-  vm_memory: 4096
-  vm_packages: ["htop", "docker.io", "nginx"]
-  vm_dns: ["192.168.122.1", "1.1.1.1"]
 ```
 
 ## ✅ **Benefits**
@@ -105,11 +94,11 @@ make build-image
 make cloud-vm
 
 # 3. Deploy other environments
-make create VM=ubuntu-cloud-test
+make create VM=ubuntu-dev
 
 # 4. Connect to VMs
-ssh vagrant@192.168.122.30  # ubuntu-cloud-dev
-ssh vagrant@192.168.122.40  # ubuntu-cloud-test
+ssh vagrant@192.168.122.10  # ubuntu-dev
+ssh vagrant@192.168.122.11  # ubuntu-gpu
 ```
 
 ## 🔧 **Troubleshooting**

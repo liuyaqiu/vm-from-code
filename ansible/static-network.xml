@@ -13,9 +13,7 @@
       <range start='192.168.122.100' end='192.168.122.200'/>
       <!-- Static DHCP reservations for VMs -->
       <host mac='52:54:00:12:34:10' name='ubuntu-dev' ip='192.168.122.10'/>
-      <host mac='52:54:00:12:34:20' name='ubuntu-test' ip='192.168.122.20'/>
-      <host mac='52:54:00:12:34:30' name='ubuntu-cloud-dev' ip='192.168.122.30'/>
-      <host mac='52:54:00:12:34:40' name='ubuntu-cloud-test' ip='192.168.122.40'/>
+      <host mac='52:54:00:12:34:11' name='ubuntu-gpu' ip='192.168.122.11'/>
     </dhcp>
   </ip>
 </network>

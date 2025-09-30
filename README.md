@@ -356,7 +356,7 @@ ping -c 3 google.com
 ```bash
 # Build and deploy with Ansible
 make packer-build-libvirt
-make ansible-create target_vm=ubuntu-cloud-dev
+make ansible-create target_vm=ubuntu-dev
 ```
 
 ### Complete Workflow:
@@ -365,7 +365,7 @@ make ansible-create target_vm=ubuntu-cloud-dev
 make setup && make build
 
 # Test with Ansible  
-make ansible-create target_vm=ubuntu-cloud-test
+make ansible-create target_vm=ubuntu-dev
 ```
 
 ## License

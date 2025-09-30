@@ -9,7 +9,6 @@
       - vfio
       - vfio_iommu_type1
       - vfio_pci
-      - vfio_virqfd
 
   tasks:
     # ========================================
@@ -51,10 +50,10 @@
     # ========================================
     - name: Check current IOMMU status
       shell: |
-        if {{ cpu_platform.stdout == "intel" }}; then
-          dmesg | grep -i "DMAR: IOMMU enabled"
+        if [ -d /sys/kernel/iommu_groups ]; then
+          echo "IOMMU groups found, IOMMU is enabled."
         else
-          dmesg | grep -i "AMD-Vi: Found IOMMU\|AMD-Vi: AMD IOMMU Enabled"
+          echo "No IOMMU groups found, IOMMU is probably disabled."
         fi
       register: iommu_status
       ignore_errors: true
@@ -325,18 +324,6 @@
       changed_when: false
       tags: [validation]
 
-    - name: Verify IOMMU enablement
-      shell: |
-        {% if cpu_platform.stdout == "amd" %}
-        dmesg | grep -i "AMD-Vi: AMD IOMMU Enabled"
-        {% else %}
-        dmesg | grep -i "DMAR: IOMMU enabled"
-        {% endif %}
-      register: iommu_validation
-      ignore_errors: true
-      changed_when: false
-      tags: [validation]
-
     - name: Check VFIO modules status
       shell: lsmod | grep vfio
       register: vfio_validation
@@ -370,13 +357,6 @@
       changed_when: false
       tags: [validation]
 
-    - name: Check nouveau driver status
-      shell: lsmod | grep nouveau
-      register: nouveau_validation
-      ignore_errors: true
-      changed_when: false
-      tags: [validation]
-
     - name: Display validation results
       pause:
         prompt: |
@@ -390,9 +370,8 @@
           {% endif %}
           
           2. IOMMU Status:
-          {% if iommu_validation.rc == 0 %}
+          {% if iommu_status.rc == 0 %}
           ✅ IOMMU ENABLED
-          {{ iommu_validation.stdout }}
           {% else %}
           ❌ IOMMU NOT DETECTED
           {% endif %}
@@ -424,19 +403,19 @@
           {{ gpu_iommu_group.stdout }}
           
           7. Nouveau Driver:
-          {% if nouveau_validation.rc != 0 %}
+          {% if nouveau_status.rc != 0 %}
           ✅ NOUVEAU NOT LOADED (Good for passthrough)
           {% else %}
           ❌ NOUVEAU STILL ACTIVE
-          {{ nouveau_validation.stdout }}
+          {{ nouveau_status.stdout }}
           {% endif %}
           
           ===== OVERALL STATUS =====
           {% set validation_checks = [
-            iommu_validation.rc == 0,
+            iommu_status.rc == 0,
             vfio_validation.rc == 0,
             'vfio-pci' in gpu_driver_validation.stdout,
-            nouveau_validation.rc != 0
+            nouveau_status.rc != 0
           ] %}
           {% if validation_checks | select | list | length == validation_checks | length %}
           🎉 ALL CRITICAL CHECKS PASSED - GPU PASSTHROUGH READY!

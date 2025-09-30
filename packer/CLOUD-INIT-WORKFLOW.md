@@ -69,16 +69,16 @@ learn-packer/
 
 ### **Development Environment**
 ```yaml
-ubuntu-cloud-dev:
-  vm_static_ip: "192.168.122.30"
+ubuntu-dev:
+  vm_static_ip: "192.168.122.10"
   vm_memory: 2048
   vm_vcpus: 2
 ```
 
-### **Production Environment**
+### **GPU Environment**
 ```yaml
-ubuntu-cloud-prod:
-  vm_static_ip: "192.168.122.40"
+ubuntu-gpu:
+  vm_static_ip: "192.168.122.11"
   vm_memory: 4096
   vm_vcpus: 4
   vm_dns: ["1.1.1.1", "8.8.8.8"]
@@ -99,10 +99,10 @@ packer build ubuntu-24.04.pkr.hcl
 ### **Deployment-time Issues**
 ```bash
 # Use debug script
-./debug-cloud-init.sh ubuntu-cloud-dev
+./debug-cloud-init.sh ubuntu-dev
 
 # Check VM cloud-init status
-virt-viewer ubuntu-cloud-dev
+virt-viewer ubuntu-dev
 # Then in VM:
 sudo cloud-init status --long
 sudo cat /var/log/cloud-init.log

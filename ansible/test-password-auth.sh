@@ -1,8 +1,8 @@
 #!/bin/bash
 # Test script to verify password authentication is working
 
-VM_IP="${1:-192.168.122.30}"
-VM_NAME="${2:-ubuntu-cloud-dev}"
+VM_IP="${1:-192.168.122.10}"
+VM_NAME="${2:-ubuntu-dev}"
 
 echo "=== Testing Password Authentication for $VM_NAME ==="
 echo "IP: $VM_IP"

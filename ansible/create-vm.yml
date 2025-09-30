@@ -8,19 +8,44 @@
     vm_config: "{{ hostvars[target_vm] }}"
     
   tasks:
-    - name: Install required packages
+    - name: Install required system packages
       package:
         name:
+          # Libvirt and virtualization
           - libvirt-daemon-system
           - libvirt-clients
+          - libvirt-dev
+          # QEMU/KVM
           - qemu-kvm
           - qemu-utils
+          - qemu-system-x86
+          # VM management tools
           - virtinst
           - virt-manager
-          - bridge-utils
           - virt-viewer
+          # Networking
+          - bridge-utils
+          - dnsmasq
+          # Cloud-init ISO creation
+          - genisoimage
+          # Python development headers (needed for libvirt-python and lxml)
+          - python3-dev
+          - gcc
+          - pkg-config
+          # XML libraries (needed for lxml)
+          - libxml2-dev
+          - libxslt1-dev
+          - zlib1g-dev
         state: present
       tags: setup
+
+    - name: Install Python dependencies for Ansible libvirt modules via uv pip
+      command: uv pip install 'libvirt-python>=9.0.0' 'lxml>=4.9.0'
+      become: false
+      delegate_to: localhost
+      tags: setup
+      register: uv_pip_result
+      changed_when: "'Successfully installed' in uv_pip_result.stdout"
 
     - name: Ensure libvirtd service is running
       systemd:
@@ -131,13 +156,10 @@
             msg: |
               ✅ Static DHCP reservations configured:
               - ubuntu-dev:       192.168.122.10 (MAC: 52:54:00:12:34:10)
-              - ubuntu-test:      192.168.122.20 (MAC: 52:54:00:12:34:20)
-              - ubuntu-cloud-dev: 192.168.122.30 (MAC: 52:54:00:12:34:30)
-              - ubuntu-cloud-test:192.168.122.40 (MAC: 52:54:00:12:34:40)
+              - ubuntu-gpu:       192.168.122.11 (MAC: 52:54:00:12:34:11)
               - DHCP range for other VMs: 192.168.122.100-200
       when: 
         - network_info is defined
-        - "'52:54:00:12:34:30' not in (network_info.xml | default(''))"
       tags: network
 
     - name: Check if source image exists
@@ -209,9 +231,9 @@
       become: false
       tags: cloud-init
 
-    - name: Set SSH key content for VM configuration
+    - name: Set SSH key content as a separate variable
       set_fact:
-        vm_config: "{{ vm_config | combine({'vm_ssh_key': ssh_public_key_content.content | b64decode | trim}) }}"
+        vm_ssh_key: "{{ ssh_public_key_content.content | b64decode | trim }}"
       tags: cloud-init
 
     - name: Generate cloud-init user-data for VM with static IP
@@ -256,6 +278,92 @@
         autostart: "{{ vm_config.vm_autostart | default(false) }}"
         uri: "{{ libvirt_uri | default('qemu:///system') }}"
       tags: autostart
+
+    - name: Validate GPU passthrough setup (if GPU VM)
+      block:
+        - name: Check if GPU device is bound to vfio-pci
+          shell: |
+            if [ -d "/sys/bus/pci/devices/{{ vm_config.gpu_device_id }}/driver" ]; then
+              driver=$(basename $(readlink /sys/bus/pci/devices/{{ vm_config.gpu_device_id }}/driver))
+              echo "$driver"
+            else
+              echo "no_driver"
+            fi
+          register: gpu_driver
+          changed_when: false
+
+        - name: Check IOMMU group viability
+          shell: |
+            iommu_group=$(basename $(readlink /sys/bus/pci/devices/{{ vm_config.gpu_device_id }}/iommu_group))
+            echo "IOMMU_GROUP:$iommu_group"
+            all_vfio=true
+            for device in /sys/kernel/iommu_groups/$iommu_group/devices/*; do
+              device_id=$(basename $device)
+              if [ -d "$device/driver" ]; then
+                driver=$(basename $(readlink $device/driver))
+              else
+                driver="no_driver"
+              fi
+              echo "DEVICE:$device_id:$driver"
+              if [ "$driver" != "vfio-pci" ]; then
+                all_vfio=false
+              fi
+            done
+            if [ "$all_vfio" = true ]; then
+              echo "STATUS:OK"
+            else
+              echo "STATUS:FAIL"
+            fi
+          register: iommu_group_info
+          changed_when: false
+
+        - name: Parse IOMMU group information
+          set_fact:
+            iommu_group_number: "{{ iommu_group_info.stdout_lines | select('match', '^IOMMU_GROUP:') | first | regex_replace('^IOMMU_GROUP:', '') }}"
+            iommu_devices: "{{ iommu_group_info.stdout_lines | select('match', '^DEVICE:') | map('regex_replace', '^DEVICE:', '') | list }}"
+            iommu_status: "{{ iommu_group_info.stdout_lines | select('match', '^STATUS:') | first | regex_replace('^STATUS:', '') }}"
+
+        - name: Display IOMMU group information
+          debug:
+            msg: |
+              IOMMU Group {{ iommu_group_number }} contains:
+              {% for device_info in iommu_devices %}
+              {% set parts = device_info.split(':') %}
+              - {{ parts[0] }} -> {{ parts[1] }}
+              {% endfor %}
+
+        - name: Fail if IOMMU group is not viable
+          fail:
+            msg: |
+              ❌ GPU passthrough is not properly configured!
+
+              GPU Device: {{ vm_config.gpu_device_id }}
+              IOMMU Group: {{ iommu_group_number }}
+
+              All devices in IOMMU Group {{ iommu_group_number }} must be bound to vfio-pci:
+              {% for device_info in iommu_devices %}
+              {% set parts = device_info.split(':') %}
+              - {{ parts[0] }}: {{ parts[1] }} {% if parts[1] != 'vfio-pci' %}❌{% else %}✅{% endif %}
+              {% endfor %}
+
+              To fix this issue, you must bind ALL devices in the IOMMU group to vfio-pci:
+
+              {% for device_info in iommu_devices %}
+              {% set parts = device_info.split(':') %}
+              {% if parts[1] != 'vfio-pci' %}
+              # Unbind {{ parts[0] }} from {{ parts[1] }}
+              echo "{{ parts[0] }}" | sudo tee /sys/bus/pci/drivers/{{ parts[1] }}/unbind
+
+              # Bind {{ parts[0] }} to vfio-pci
+              echo "vfio-pci" | sudo tee /sys/bus/pci/devices/{{ parts[0] }}/driver_override
+              echo "{{ parts[0] }}" | sudo tee /sys/bus/pci/drivers/vfio-pci/bind
+              {% endif %}
+              {% endfor %}
+
+              Or see ansible/NVIDIA-GPU-PASSTHROUGH-GUIDE.md for detailed setup steps.
+          when: iommu_status != "OK"
+      when: vm_config.gpu_passthrough | default(false) | bool
+      tags: [gpu-validation, start]
 
     - name: Start VM
       community.libvirt.virt:

@@ -1,0 +1,11 @@
+[tools]
+python = "3.12"
+uv = "latest"
+
+[env]
+_.python.venv = { path = ".venv", create = true }
+UV_PROJECT_ENVIRONMENT = ".venv"
+
+[tasks.install-deps]
+description = "Install Python dependencies using uv"
+run = "uv pip install -r requirements.txt"

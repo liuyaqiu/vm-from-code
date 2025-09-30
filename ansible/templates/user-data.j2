@@ -16,7 +16,7 @@ users:
     # Keep the password: vagrant (hashed)
     passwd: $6$R4BhFdKhYX9qD9lS$7dpmvCiT70Rici8D.3M2uMYD0AeOBrP49UnUvHesqMgPARjQoMxJx2DX/Ax2CaeVxU03qyjT.wMRPAjkEYO2l0
     ssh_authorized_keys:
-      - {{ vm_config.vm_ssh_key }}
+      - {{ vm_ssh_key }}
 
 # SSH configuration - ensure password authentication is enabled
 ssh_pwauth: true

@@ -9,51 +9,15 @@ all:
     
     vms:
       hosts:
-        # Simple cloud image VMs (no GPU passthrough)
-        ubuntu-cloud-dev:
-          vm_name: "ubuntu-cloud-dev"
-          vm_hostname: "ubuntu-dev"
-          vm_memory: 2048
-          vm_vcpus: 2
-          vm_disk_size: "50G"
-          vm_network: "default"
-          vm_os_variant: "ubuntu24.04"
-          vm_autostart: false
-          gpu_passthrough: false
-          # Network configuration - MAC address for static DHCP
-          vm_mac_address: "52:54:00:12:34:30"
-          # Deployment-specific cloud-init settings
-          vm_static_ip: "192.168.122.30"
-          vm_gateway: "192.168.122.1"
-          vm_dns: ["192.168.122.1", "8.8.8.8"]
-          vm_packages: ["htop", "curl", "wget"]
-          
-        ubuntu-cloud-test:
-          vm_name: "ubuntu-cloud-test"
-          vm_hostname: "ubuntu-test"
-          vm_memory: 4096
-          vm_vcpus: 4
-          vm_disk_size: "40G"
-          vm_network: "default"
-          vm_os_variant: "ubuntu24.04"
-          vm_autostart: false
-          gpu_passthrough: false
-          # Network configuration - MAC address for static DHCP
-          vm_mac_address: "52:54:00:12:34:40"
-          # Deployment-specific cloud-init settings
-          vm_static_ip: "192.168.122.40"
-          vm_gateway: "192.168.122.1"
-          vm_dns: ["192.168.122.1", "1.1.1.1"]
-          vm_packages: ["htop", "docker.io", "nginx"]
-          
         # Legacy VM configurations (for reference)
         ubuntu-dev:
           vm_name: "ubuntu-dev"
-          vm_hostname: "ubuntu-legacy-dev"
+          vm_hostname: "ubuntu-dev"
           vm_memory: 4096
           vm_vcpus: 2
           vm_disk_size: "40G"
           vm_network: "default"
+          vm_mac_address: "52:54:00:12:34:10"
           vm_os_variant: "ubuntu24.04"
           vm_autostart: false
           gpu_passthrough: false
@@ -64,26 +28,20 @@ all:
           vm_packages: ["build-essential", "git", "vim"]
           
         # GPU passthrough VMs (disabled by default, see GPU-PASSTHROUGH-AMD.md)
-        ubuntu-gpu-nvidia:
-          vm_name: "ubuntu-gpu-nvidia"
+        ubuntu-gpu:
+          vm_name: "ubuntu-gpu"
+          vm_hostname: "ubuntu-gpu"
           vm_memory: 8192
           vm_vcpus: 4
           vm_disk_size: "80G"
           vm_network: "default"
+          vm_mac_address: "52:54:00:12:34:11"
           vm_os_variant: "ubuntu24.04"
           vm_autostart: false
           # NVIDIA RTX A6000 GPU passthrough (uncomment when needed)
-          gpu_passthrough: false  # Change to true when GPU is configured
-          gpu_device_id: "0000:01:00.0"  # NVIDIA RTX A6000
-          
-        ubuntu-gpu-amd:
-          vm_name: "ubuntu-gpu-amd"
-          vm_memory: 8192
-          vm_vcpus: 4
-          vm_disk_size: "80G"
-          vm_network: "default"
-          vm_os_variant: "ubuntu24.04"
-          vm_autostart: false
-          # AMD GPU passthrough (uncomment when needed)
-          gpu_passthrough: false  # Change to true when GPU is configured
-          gpu_device_id: "0000:11:00.0"  # AMD GPU
+          gpu_passthrough: true # Change to true when GPU is configured
+          gpu_device_id: "0000:01:00.0"
+          vm_static_ip: "192.168.122.11"
+          vm_gateway: "192.168.122.1"
+          vm_dns: ["192.168.122.1", "8.8.8.8"]
+          vm_packages: ["build-essential", "git", "vim"]

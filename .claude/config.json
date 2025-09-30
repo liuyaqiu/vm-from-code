@@ -1,0 +1,109 @@
+{
+  "name": "vm-from-code",
+  "description": "Automated VM image creation with Packer and deployment with Ansible for libvirt/KVM",
+  "version": "1.0.0",
+  "language": "shell",
+  "frameworks": ["packer", "ansible", "libvirt"],
+
+  "commands": {
+    "setup": {
+      "command": "make setup",
+      "description": "Complete setup: install Packer, QEMU/KVM, and initialize plugins"
+    },
+    "build": {
+      "command": "make build",
+      "description": "Build Ubuntu 24.04 libvirt/KVM image"
+    },
+    "test": {
+      "command": "cd packer && make test-libvirt",
+      "description": "Test the built image"
+    },
+    "list-vms": {
+      "command": "make ansible-list",
+      "description": "List all VMs"
+    },
+    "clean": {
+      "command": "make clean",
+      "description": "Clean all build artifacts"
+    }
+  },
+
+  "files": {
+    "important": [
+      "CLAUDE.md",
+      "README.md",
+      "Makefile",
+      "packer/ubuntu-24.04.pkr.hcl",
+      "ansible/inventory.yml",
+      "ansible/create-vm.yml"
+    ],
+    "documentation": [
+      "CLAUDE.md",
+      "README.md",
+      "NETWORK-CONFIGURATION.md",
+      "packer/README.md",
+      "packer/CLOUD-INIT-WORKFLOW.md",
+      "packer/CLOUD-IMAGE-MIGRATION.md",
+      "ansible/README.md",
+      "ansible/NVIDIA-GPU-PASSTHROUGH-GUIDE.md",
+      "ansible/CLOUD-INIT-CONFLICT-SOLUTION.md",
+      "ansible/UPDATED-WORKFLOW.md"
+    ],
+    "configuration": [
+      "packer/ubuntu-24.04.pkr.hcl",
+      "packer/cloud-init/user-data",
+      "packer/cloud-init/meta-data",
+      "ansible/inventory.yml",
+      "ansible/group_vars/all.yml",
+      "ansible/templates/vm-config.xml.j2",
+      "ansible/templates/user-data.j2"
+    ]
+  },
+
+  "projectContext": {
+    "buildTool": "make",
+    "imageBuilder": "packer",
+    "configManagement": "ansible",
+    "virtualization": "libvirt/KVM",
+    "osTarget": "Ubuntu 24.04 LTS",
+    "architecture": "Two-phase: Packer builds base images with reset cloud-init state, Ansible deploys VMs with deployment-specific configuration"
+  },
+
+  "workflows": {
+    "first-time-setup": [
+      "make setup",
+      "make build",
+      "make ansible-create target_vm=ubuntu-dev"
+    ],
+    "rebuild-image": [
+      "make clean",
+      "make build"
+    ],
+    "deploy-new-vm": [
+      "Edit ansible/inventory.yml to add new VM definition",
+      "make ansible-create target_vm=<vm-name>"
+    ],
+    "gpu-passthrough-setup": [
+      "make ansible-gpu-setup",
+      "Edit /etc/default/grub to add IOMMU parameters",
+      "sudo update-grub && sudo reboot",
+      "Set gpu_passthrough: true in ansible/inventory.yml",
+      "make ansible-create target_vm=<gpu-vm-name>"
+    ]
+  },
+
+  "conventions": {
+    "vmNaming": "Use descriptive names like 'ubuntu-dev', 'ubuntu-gpu'",
+    "networkConfig": "Static IPs in 192.168.122.0/24 range, configured in ansible/inventory.yml",
+    "authentication": "Default user is 'vagrant' with password 'vagrant', SSH keys in secrets/",
+    "cloudInit": "Build-time cloud-init in packer/cloud-init/, deploy-time in ansible/templates/"
+  },
+
+  "tips": [
+    "Always read CLAUDE.md first for architecture overview",
+    "Base image cloud-init state is reset - each VM gets fresh cloud-init run",
+    "Use 'make help' to see all available commands",
+    "VM definitions are in ansible/inventory.yml",
+    "Packer builds create reusable base images, Ansible creates VM-specific disks via copy-on-write"
+  ]
+}

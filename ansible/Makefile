@@ -15,15 +15,15 @@ help:
 	@echo ""
 	@echo "  === VM Management ==="
 	@echo "  list           - List all VMs and their status"
-	@echo "  create VM=name - Create and start VM (e.g., make create VM=ubuntu-cloud-dev)"
-	@echo "  cloud-vm       - Quick create cloud VM for development (uses ubuntu-cloud-dev)"
+	@echo "  create VM=name - Create and start VM (e.g., make create VM=ubuntu-dev)"
+	@echo "  cloud-vm       - Quick create cloud VM for development (uses ubuntu-dev)"
 	@echo "  start VM=name  - Start VM"
 	@echo "  stop VM=name   - Stop VM gracefully"
 	@echo "  restart VM=name- Restart VM"
 	@echo "  destroy VM=name- Destroy VM completely"
 	@echo "  destroy-all VM=name - Destroy VM and clean up base image (affects all VMs)"
-	@echo "  ssh [VM=name]  - SSH into VM using SSH key (default: ubuntu-cloud-dev)"
-	@echo "  ssh-pass [VM=name] - SSH into VM using password (default: ubuntu-cloud-dev)"
+	@echo "  ssh [VM=name]  - SSH into VM using SSH key (default: ubuntu-dev)"
+	@echo "  ssh-pass [VM=name] - SSH into VM using password (default: ubuntu-dev)"
 	@echo ""
 	@echo "  === GPU Features ==="
 	@echo "  gpu-setup      - Setup GPU passthrough (see GPU-PASSTHROUGH-AMD.md)"
@@ -58,10 +58,10 @@ build-image:
 cloud-vm:
 	@echo "Deploying development VM with environment-specific cloud-init..."
 	@echo "Using clean base image with deployment-time network configuration"
-	ansible-playbook -i inventory.yml create-vm.yml -e target_vm=ubuntu-cloud-dev --ask-become-pass
-	@echo "✅ VM 'ubuntu-cloud-dev' deployed with static IP!"
-	@echo "Connect with: ssh vagrant@192.168.122.30 (password: vagrant)"
-	@echo "Or use VNC: virt-viewer ubuntu-cloud-dev"
+	ansible-playbook -i inventory.yml create-vm.yml -e target_vm=ubuntu-dev --ask-become-pass
+	@echo "✅ VM 'ubuntu-dev' deployed with static IP!"
+	@echo "Connect with: ssh vagrant@192.168.122.10 (password: vagrant)"
+	@echo "Or use VNC: virt-viewer ubuntu-dev"
 
 # List all VMs
 list:
@@ -132,14 +132,14 @@ force-stop:
 	fi
 	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=force-stop --ask-become-pass
 
-# SSH into VM using SSH key (default: ubuntu-cloud-dev)
+# SSH into VM using SSH key (default: ubuntu-dev)
 ssh:
-	@VM_NAME=$(or $(VM),ubuntu-cloud-dev); \
+	@VM_NAME=$(or $(VM),ubuntu-dev); \
 	VM_IP=$$(ansible-inventory -i inventory.yml --host $$VM_NAME | grep vm_static_ip | cut -d'"' -f4); \
 	if [ -z "$$VM_IP" ]; then \
 		echo "Error: Could not find IP address for VM '$$VM_NAME'"; \
 		echo "Available VMs:"; \
-		ansible-inventory -i inventory.yml --list | grep -E '(ubuntu-cloud-dev|ubuntu-cloud-test|ubuntu-dev)' | head -10; \
+		ansible-inventory -i inventory.yml --list | grep -E '(ubuntu-dev|ubuntu-gpu)' | head -10; \
 		exit 1; \
 	fi; \
 	if [ ! -f "../secrets/libvirt_vms_ed25519" ]; then \
@@ -154,14 +154,14 @@ ssh:
 		-o UserKnownHostsFile=/dev/null \
 		vagrant@$$VM_IP
 
-# SSH into VM using password (default: ubuntu-cloud-dev)
+# SSH into VM using password (default: ubuntu-dev)
 ssh-pass:
-	@VM_NAME=$(or $(VM),ubuntu-cloud-dev); \
+	@VM_NAME=$(or $(VM),ubuntu-dev); \
 	VM_IP=$$(ansible-inventory -i inventory.yml --host $$VM_NAME | grep vm_static_ip | cut -d'"' -f4); \
 	if [ -z "$$VM_IP" ]; then \
 		echo "Error: Could not find IP address for VM '$$VM_NAME'"; \
 		echo "Available VMs:"; \
-		ansible-inventory -i inventory.yml --list | grep -E '(ubuntu-cloud-dev|ubuntu-cloud-test|ubuntu-dev)' | head -10; \
+		ansible-inventory -i inventory.yml --list | grep -E '(ubuntu-dev|ubuntu-gpu)' | head -10; \
 		exit 1; \
 	fi; \
 	echo "Connecting to $$VM_NAME at $$VM_IP using password..."; \
