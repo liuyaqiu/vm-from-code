@@ -31,8 +31,10 @@
       tags: details
 
     - name: Display VM summary
-      debug:
-        msg: |
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
           Total VMs: {{ all_vms.list_vms | length }}
           Running VMs: {{ running_vms.list_vms | length }}
           
@@ -44,8 +46,11 @@
       tags: summary
 
     - name: Display message when no VMs exist
-      debug:
-        msg: "No VMs found in libvirt."
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          No VMs found in libvirt.
       when: all_vms.list_vms | length == 0
       tags: summary
 
@@ -57,8 +62,10 @@
       tags: network
 
     - name: Display network information
-      debug:
-        msg: |
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
           Available networks:
           {% for net in networks.list_nets %}
           - {{ net }}

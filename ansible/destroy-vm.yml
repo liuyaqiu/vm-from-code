@@ -10,10 +10,10 @@
   tasks:
     - name: Check if VM exists
       community.libvirt.virt:
-        command: info
+        command: status
         name: "{{ vm_config.vm_name }}"
         uri: "{{ libvirt_uri | default('qemu:///system') }}"
-      register: vm_info
+      register: vm_status
       ignore_errors: true
       tags: check
 
@@ -22,16 +22,23 @@
         name: "{{ vm_config.vm_name }}"
         state: shutdown
         uri: "{{ libvirt_uri | default('qemu:///system') }}"
-      when: vm_info is succeeded and vm_info.status != 'shutdown'
+      when: vm_status is succeeded and vm_status.status == 'running'
       ignore_errors: true
       tags: stop
 
-    - name: Force destroy VM if shutdown fails
+    - name: Wait for graceful shutdown
+      wait_for:
+        timeout: 10
+      when: vm_status is succeeded and vm_status.status == 'running'
+      delegate_to: localhost
+      tags: stop
+
+    - name: Force destroy VM if still running
       community.libvirt.virt:
         name: "{{ vm_config.vm_name }}"
         state: destroyed
         uri: "{{ libvirt_uri | default('qemu:///system') }}"
-      when: vm_info is succeeded
+      when: vm_status is succeeded
       ignore_errors: true
       tags: destroy
 
@@ -40,7 +47,7 @@
         command: undefine
         name: "{{ vm_config.vm_name }}"
         uri: "{{ libvirt_uri | default('qemu:///system') }}"
-      when: vm_info is succeeded
+      when: vm_status is succeeded
       ignore_errors: true
       tags: undefine
 
@@ -69,12 +76,18 @@
       tags: cleanup
 
     - name: Display destruction status
-      debug:
-        msg: "VM '{{ vm_config.vm_name }}' has been destroyed and cleaned up."
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          VM '{{ vm_config.vm_name }}' has been destroyed and cleaned up.
       tags: info
       
     - name: Display base image cleanup info
-      debug:
-        msg: "Base image '{{ base_image_name }}' was also removed."
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          Base image '{{ base_image_name }}' was also removed.
       when: cleanup_base_image | default(false) | bool
       tags: info

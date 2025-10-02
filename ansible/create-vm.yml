@@ -97,8 +97,10 @@
       tags: setup
 
     - name: Display SSH key information
-      debug:
-        msg: |
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
           {% if ssh_key_stat.stat.exists %}
           ✅ SSH key already exists: {{ vm_ssh_key_path }}
           {% else %}
@@ -152,8 +154,10 @@
             uri: "{{ libvirt_uri | default('qemu:///system') }}"
 
         - name: Display static DHCP configuration
-          debug:
-            msg: |
+          pause:
+            echo: false
+            seconds: 1
+            prompt: |
               ✅ Static DHCP reservations configured:
               - ubuntu-dev:       192.168.122.10 (MAC: 52:54:00:12:34:10)
               - ubuntu-gpu:       192.168.122.11 (MAC: 52:54:00:12:34:11)
@@ -205,8 +209,10 @@
       tags: disk
 
     - name: Display disk size info
-      debug:
-        msg: |
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
           Current virtual size: {{ (current_virtual_size | int / 1024 / 1024 / 1024) | round(1) }}G
           Target size: {{ vm_config.vm_disk_size | default(default_vm_disk_size) }}
           {% if target_size_bytes | int > current_virtual_size | int %}
@@ -324,8 +330,10 @@
             iommu_status: "{{ iommu_group_info.stdout_lines | select('match', '^STATUS:') | first | regex_replace('^STATUS:', '') }}"
 
         - name: Display IOMMU group information
-          debug:
-            msg: |
+          pause:
+            echo: false
+            seconds: 1
+            prompt: |
               IOMMU Group {{ iommu_group_number }} contains:
               {% for device_info in iommu_devices %}
               {% set parts = device_info.split(':') %}
@@ -380,9 +388,419 @@
       tags: info
 
     - name: Display VM information
-      debug:
-        msg: |
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
           VM '{{ vm_config.vm_name }}' has been created and started.
           Connect via VNC: virt-viewer {{ vm_config.vm_name }}
           Or use SSH once the VM is fully booted: ssh {{ vm_ssh_user }}@<VM_IP>
       tags: info
+
+    # Post-deployment setup (NVIDIA, Docker, etc.)
+    - name: Prepare VM for post-deployment tasks
+      block:
+        - name: Wait for VM to be accessible via SSH
+          wait_for:
+            host: "{{ vm_config.vm_static_ip }}"
+            port: 22
+            delay: 10
+            timeout: 300
+            state: started
+          delegate_to: localhost
+          become: false
+
+        - name: Add VM to in-memory inventory for post-deployment tasks
+          add_host:
+            name: "{{ vm_config.vm_name }}"
+            ansible_host: "{{ vm_config.vm_static_ip }}"
+            ansible_user: "{{ vm_ssh_user }}"
+            ansible_ssh_private_key_file: "{{ vm_ssh_key_path }}"
+            ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+            install_nvidia: "{{ vm_config.install_nvidia | default(false) }}"
+            cuda_version: "{{ vm_config.cuda_version | default('13.0') }}"
+            install_docker: "{{ vm_config.install_docker | default(false) }}"
+            custom_packages: "{{ vm_config.custom_packages | default([]) }}"
+            post_install_script: "{{ vm_config.post_install_script | default('') }}"
+      when: vm_config.install_nvidia | default(false) | bool or vm_config.install_docker | default(false) | bool or (vm_config.custom_packages | default([]) | length > 0) or (vm_config.post_install_script | default('') | length > 0)
+      tags: [post-deploy]
+
+    - name: Display NVIDIA installation starting message
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ⏳ Starting NVIDIA driver and CUDA {{ vm_config.cuda_version | default('13.0') }} installation...
+          This will take several minutes and requires a reboot.
+      when: vm_config.install_nvidia | default(false) | bool
+      tags: [nvidia, post-deploy]
+
+- name: Post-deployment NVIDIA setup
+  hosts: "{{ target_vm }}"
+  become: true
+  gather_facts: true
+  ignore_unreachable: yes
+
+  tasks:
+    - name: Install NVIDIA drivers and CUDA
+      block:
+        - name: Download CUDA repository keyring
+          get_url:
+            url: https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+            dest: /tmp/cuda-keyring_1.1-1_all.deb
+            mode: '0644'
+
+        - name: Install CUDA repository keyring
+          apt:
+            deb: /tmp/cuda-keyring_1.1-1_all.deb
+            state: present
+
+        - name: Update apt cache
+          apt:
+            update_cache: yes
+
+        - name: Install NVIDIA drivers and CUDA toolkit (silent installation)
+          apt:
+            name:
+              - libnvidia-compute-580
+              - nvidia-dkms-580-open
+              - cuda-toolkit
+              - nvidia-gds
+            state: present
+            install_recommends: yes
+          environment:
+            DEBIAN_FRONTEND: noninteractive
+
+        - name: Hold NVIDIA and CUDA packages to prevent auto-updates
+          dpkg_selections:
+            name: "{{ item }}"
+            selection: hold
+          loop:
+            - libnvidia-compute-580
+            - nvidia-dkms-580-open
+            - cuda-toolkit
+            - nvidia-gds
+
+        - name: Create CUDA environment configuration
+          copy:
+            dest: /etc/profile.d/cuda.sh
+            mode: '0644'
+            content: |
+              # CUDA environment configuration
+              export PATH=${PATH}:/usr/local/cuda-{{ cuda_version | default('13.0') }}/bin
+              export LD_LIBRARY_PATH=${LD_LIBRARY_PATH}:/usr/local/cuda-{{ cuda_version | default('13.0') }}/lib64
+
+        - name: Display pre-reboot message
+          pause:
+            echo: false
+            seconds: 1
+            prompt: |
+              ✅ NVIDIA drivers and CUDA toolkit installed successfully
+              🔄 Rebooting VM to load NVIDIA kernel modules...
+
+        - name: Reboot VM to load NVIDIA drivers
+          reboot:
+            reboot_timeout: 600
+            msg: "Rebooting to load NVIDIA drivers"
+
+        - name: Wait for VM to come back online after reboot
+          wait_for_connection:
+            delay: 10
+            timeout: 300
+
+        - name: Verify NVIDIA driver installation
+          command: /usr/bin/nvidia-smi
+          register: nvidia_smi_output
+          changed_when: false
+          failed_when: nvidia_smi_output.rc != 0
+
+        - name: Verify CUDA compiler installation
+          shell: /usr/local/cuda-{{ cuda_version | default('13.0') }}/bin/nvcc --version
+          register: nvcc_output
+          changed_when: false
+          failed_when: nvcc_output.rc != 0
+
+        - name: Display NVIDIA installation success
+          pause:
+            echo: false
+            seconds: 1
+            prompt: |
+              ✅ NVIDIA driver and CUDA installation completed successfully!
+
+              === nvidia-smi output ===
+              {{ nvidia_smi_output.stdout }}
+
+              === nvcc version ===
+              {{ nvcc_output.stdout }}
+
+              📦 Installed packages are locked (held) to prevent auto-updates
+              🔧 CUDA environment variables configured in /etc/profile.d/cuda.sh
+
+      rescue:
+        - name: Display NVIDIA installation failure
+          fail:
+            msg: |
+              ❌ NVIDIA driver and CUDA installation failed!
+
+              Please check the VM logs for details:
+              ssh {{ ansible_user }}@{{ ansible_host }}
+              sudo journalctl -xe
+
+              You can also check DKMS build logs:
+              sudo dkms status
+      when: install_nvidia | default(false) | bool
+      tags: [nvidia, post-deploy]
+
+- name: Post-deployment Docker Engine setup
+  hosts: "{{ target_vm }}"
+  become: true
+  gather_facts: true
+  ignore_unreachable: yes
+
+  tasks:
+    - name: Install Docker Engine
+      block:
+        - name: Install prerequisites for Docker repository
+          apt:
+            name:
+              - ca-certificates
+              - curl
+            state: present
+            update_cache: yes
+
+        - name: Create directory for apt keyrings
+          file:
+            path: /etc/apt/keyrings
+            state: directory
+            mode: '0755'
+
+        - name: Download Docker GPG key
+          get_url:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            dest: /etc/apt/keyrings/docker.asc
+            mode: '0644'
+
+        - name: Get system architecture
+          command: dpkg --print-architecture
+          register: system_arch
+          changed_when: false
+
+        - name: Get Ubuntu codename
+          shell: . /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}"
+          register: ubuntu_codename
+          changed_when: false
+
+        - name: Add Docker repository to apt sources
+          apt_repository:
+            repo: "deb [arch={{ system_arch.stdout }} signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu {{ ubuntu_codename.stdout }} stable"
+            filename: docker
+            state: present
+
+        - name: Update apt cache after adding Docker repository
+          apt:
+            update_cache: yes
+
+        - name: Install Docker Engine and plugins
+          apt:
+            name:
+              - docker-ce
+              - docker-ce-cli
+              - containerd.io
+              - docker-buildx-plugin
+              - docker-compose-plugin
+            state: present
+            install_recommends: yes
+          environment:
+            DEBIAN_FRONTEND: noninteractive
+
+        - name: Start and enable Docker service
+          systemd:
+            name: docker
+            state: started
+            enabled: yes
+
+        - name: Verify Docker service is running
+          systemd:
+            name: docker
+          register: docker_service_status
+
+        - name: Ensure docker group exists
+          group:
+            name: docker
+            state: present
+
+        - name: Add vagrant user to docker group for non-root access
+          user:
+            name: vagrant
+            groups: docker
+            append: yes
+
+        - name: Verify Docker installation with hello-world
+          shell: docker run --rm hello-world
+          register: docker_hello_output
+          changed_when: false
+
+        - name: Display Docker installation success
+          pause:
+            echo: false
+            seconds: 1
+            prompt: |
+              ✅ Docker Engine installation completed successfully!
+
+              === Docker Version ===
+              {{ docker_hello_output.stdout }}
+
+              === Docker Service Status ===
+              Docker service is {{ docker_service_status.status.ActiveState }}
+
+              ℹ️  User 'vagrant' has been added to docker group
+              ℹ️  To use Docker without sudo, log out and back in, or run: newgrp docker
+
+              🔧 Docker Compose is available as 'docker compose' (plugin)
+
+      rescue:
+        - name: Display Docker installation failure
+          fail:
+            msg: |
+              ❌ Docker Engine installation failed!
+
+              Please check the VM logs for details:
+              ssh {{ ansible_user }}@{{ ansible_host }}
+              sudo journalctl -u docker.service -xe
+
+              Check Docker service status:
+              sudo systemctl status docker
+      when: install_docker | default(false) | bool
+      tags: [docker, post-deploy]
+
+- name: Post-deployment custom package installation
+  hosts: "{{ target_vm }}"
+  become: true
+  gather_facts: true
+  ignore_unreachable: yes
+
+  tasks:
+    - name: Install custom deb packages from URLs
+      block:
+        - name: Download custom deb package
+          get_url:
+            url: "{{ item.url }}"
+            dest: "/tmp/{{ item.name }}"
+            mode: '0644'
+          loop: "{{ custom_packages }}"
+          when: custom_packages | default([]) | length > 0
+
+        - name: Install custom deb package
+          apt:
+            deb: "/tmp/{{ item.name }}"
+            state: present
+          loop: "{{ custom_packages }}"
+          when: custom_packages | default([]) | length > 0
+
+        - name: Clean up downloaded deb packages
+          file:
+            path: "/tmp/{{ item.name }}"
+            state: absent
+          loop: "{{ custom_packages }}"
+          when: custom_packages | default([]) | length > 0
+
+        - name: Display custom package installation success
+          pause:
+            echo: false
+            seconds: 1
+            prompt: |
+              ✅ Custom packages installed successfully!
+              {% for pkg in custom_packages %}
+              - {{ pkg.name }}
+              {% endfor %}
+          when: custom_packages | default([]) | length > 0
+
+      rescue:
+        - name: Display custom package installation failure
+          fail:
+            msg: |
+              ❌ Custom package installation failed!
+
+              Please check the VM for details:
+              ssh {{ ansible_user }}@{{ ansible_host }}
+      when: custom_packages | default([]) | length > 0
+      tags: [custom-packages, post-deploy]
+
+- name: Post-installation script execution
+  hosts: "{{ target_vm }}"
+  become: true
+  gather_facts: true
+  ignore_unreachable: yes
+
+  tasks:
+    - name: Execute post-installation script
+      block:
+        - name: Check if post-install script is a file path
+          stat:
+            path: "{{ post_install_script }}"
+          delegate_to: localhost
+          become: false
+          register: script_file_stat
+          when: post_install_script | default('') | length > 0
+
+        - name: Copy local script file to VM
+          copy:
+            src: "{{ post_install_script }}"
+            dest: "/tmp/post-install.sh"
+            mode: '0755'
+          when:
+            - post_install_script | default('') | length > 0
+            - script_file_stat.stat.exists | default(false)
+
+        - name: Create inline script on VM
+          copy:
+            content: "{{ post_install_script }}"
+            dest: "/tmp/post-install.sh"
+            mode: '0755'
+          when:
+            - post_install_script | default('') | length > 0
+            - not (script_file_stat.stat.exists | default(false))
+
+        - name: Execute post-installation script
+          shell: /tmp/post-install.sh
+          register: script_output
+          when: post_install_script | default('') | length > 0
+
+        - name: Display post-installation script output
+          pause:
+            echo: false
+            seconds: 1
+            prompt: |
+              ✅ Post-installation script executed successfully!
+
+              === Script Output ===
+              {{ script_output.stdout }}
+
+              {% if script_output.stderr %}
+              === Script Errors (if any) ===
+              {{ script_output.stderr }}
+              {% endif %}
+          when: post_install_script | default('') | length > 0
+
+        - name: Clean up post-installation script
+          file:
+            path: "/tmp/post-install.sh"
+            state: absent
+          when: post_install_script | default('') | length > 0
+
+      rescue:
+        - name: Display post-installation script failure
+          fail:
+            msg: |
+              ❌ Post-installation script execution failed!
+
+              Script output:
+              {{ script_output.stdout | default('') }}
+
+              Script errors:
+              {{ script_output.stderr | default('') }}
+
+              Please check the VM for details:
+              ssh {{ ansible_user }}@{{ ansible_host }}
+      when: post_install_script | default('') | length > 0
+      tags: [post-install-script, post-deploy]

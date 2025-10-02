@@ -32,7 +32,6 @@ packages:
   - net-tools
   - iputils-ping
   - openssh-server
-  - build-essential
 
 # No SSH configuration files in base image - let deployment handle this
 

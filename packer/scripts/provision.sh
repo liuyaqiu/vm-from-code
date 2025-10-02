@@ -36,22 +36,10 @@ sudo apt-get install -y \
     apt-transport-https \
     ca-certificates \
     gnupg \
-    lsb-release
-
-# Try to install linux headers if available (optional for cloud images)
-echo "Attempting to install linux headers..."
-if sudo apt-get install -y linux-headers-$(uname -r) 2>/dev/null; then
-    echo "Linux headers installed successfully"
-else
-    echo "Linux headers not available for this kernel version (normal for cloud images)"
-fi
-
-# Verify critical installations
-echo "Verifying installations..."
-curl --version || echo "curl not found"
-wget --version || echo "wget not found"  
-vim --version || echo "vim not found"
-git --version || echo "git not found"
+    lsb-release \
+    build-essential \
+    linux-headers-$(uname -r) \
+    linux-generic
 
 # Test network connectivity
 echo "Testing network connectivity..."

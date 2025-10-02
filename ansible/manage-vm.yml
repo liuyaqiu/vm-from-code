@@ -63,6 +63,8 @@
       tags: status
 
     - name: Display VM status
-      debug:
-        msg: "VM '{{ vm_config.vm_name }}' is {{ vm_status.status }}"
+      pause:
+        seconds: 1
+        prompt: |
+          VM '{{ vm_config.vm_name }}' is {{ vm_status.status }}
       tags: status
