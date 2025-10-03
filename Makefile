@@ -58,13 +58,14 @@ clean:
 	@echo "Clean complete."
 
 # === INSTALLATION TARGETS ===
-# Install build-time dependencies (Packer)
-install: packer-install
-	@echo "✅ Build dependencies installed!"
-	@echo "📋 For runtime dependencies (QEMU/KVM), use: make ansible-setup"
+mise-setup:
+	@echo "Setting up mise..."
+	@mise install
+	@mise run install-deps
+	@echo "✅ Mise setup complete!"
 
 # Complete setup: install build tools + setup runtime environment
-setup: install ansible-setup packer-init
+setup: mise-setup packer-init
 	@echo "✅ Complete setup finished! You can now run 'make build'"
 
 # === PACKER DELEGATION TARGETS ===

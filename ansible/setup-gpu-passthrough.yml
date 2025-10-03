@@ -86,10 +86,18 @@
       changed_when: false
       tags: [info, gpu]
 
-    - name: Parse NVIDIA GPU device details
+    - name: Parse NVIDIA GPU VGA device ID
       shell: |
-        lspci -nn | grep -i nvidia | head -1 | sed -E 's/.*\[([0-9a-f]{4}):([0-9a-f]{4})\].*/\1:\2/'
-      register: nvidia_device_id
+        lspci -nn | grep -i nvidia | grep -E "VGA|3D|Display" | head -1 | sed -E 's/.*\[([0-9a-f]{4}):([0-9a-f]{4})\].*/\1:\2/'
+      register: nvidia_gpu_device_id
+      when: nvidia_gpus.rc == 0
+      changed_when: false
+      tags: [info, gpu]
+
+    - name: Parse NVIDIA GPU Audio device ID
+      shell: |
+        lspci -nn | grep -i nvidia | grep -i audio | head -1 | sed -E 's/.*\[([0-9a-f]{4}):([0-9a-f]{4})\].*/\1:\2/'
+      register: nvidia_audio_device_id
       when: nvidia_gpus.rc == 0
       changed_when: false
       tags: [info, gpu]
@@ -108,12 +116,13 @@
           ===== GPU DISCOVERY RESULTS =====
           All GPU devices found:
           {{ all_gpus.stdout }}
-          
+
           {% if nvidia_gpus.rc == 0 %}
           NVIDIA GPUs found:
           {{ nvidia_gpus.stdout }}
-          
-          Primary NVIDIA Device ID: {{ nvidia_device_id.stdout | default('Not detected') }}
+
+          NVIDIA VGA Device ID: {{ nvidia_gpu_device_id.stdout | default('Not detected') }}
+          NVIDIA Audio Device ID: {{ nvidia_audio_device_id.stdout | default('Not detected') }}
           {% else %}
           ⚠️  No NVIDIA GPUs detected!
           {% endif %}
@@ -162,11 +171,11 @@
       set_fact:
         grub_params: |
           {% if cpu_platform.stdout == "amd" %}
-          amd_iommu=on iommu=pt{% if nvidia_device_id.stdout is defined %} vfio-pci.ids={{ nvidia_device_id.stdout }}{% endif %}
+          iommu=pt
           {% elif cpu_platform.stdout == "intel" %}
-          intel_iommu=on iommu=pt{% if nvidia_device_id.stdout is defined %} vfio-pci.ids={{ nvidia_device_id.stdout }}{% endif %}
+          intel_iommu=on iommu=pt
           {% endif %}
-      when: nvidia_device_id.stdout is defined
+      when: nvidia_gpu_device_id.stdout is defined
       tags: [config, grub]
 
     - name: Display GRUB configuration instructions
@@ -200,7 +209,7 @@
           ⚠️  Please execute them manually and ensure you understand the changes!
           
           Press ENTER when you have read and understood these instructions...
-      when: nvidia_device_id.stdout is defined
+      when: nvidia_gpu_device_id.stdout is defined
       tags: [config, grub]
 
     # ========================================
@@ -239,20 +248,40 @@
         backup: true
       tags: [config, drivers]
 
-    - name: Display nouveau blacklist instructions
+    - name: Generate nvidia blacklist configuration
+      copy:
+        content: |
+          blacklist nvidia
+          blacklist nvidia_drm
+          blacklist nvidia_modeset
+          blacklist nvidia_uvm
+        dest: /etc/modprobe.d/blacklist-nvidia.conf
+      tags: [config, drivers]
+
+    - name: Generate vfio-pci device binding configuration
+      copy:
+        content: |
+          options vfio-pci ids={{ nvidia_gpu_device_id.stdout }},{{ nvidia_audio_device_id.stdout }}
+          softdep nouveau pre: vfio-pci
+          softdep nvidia pre: vfio-pci
+        dest: /etc/modprobe.d/vfio-pci.conf
+        backup: true
+      when: nvidia_gpu_device_id.stdout is defined and nvidia_audio_device_id.stdout is defined
+      tags: [config, drivers, vfio]
+
+    - name: Display kernel module configuration status
       pause:
         seconds: 2
         prompt: |
-          ===== NOUVEAU DRIVER BLACKLIST =====
-          
+          ===== KERNEL MODULE CONFIGURATION =====
+
           ✅ Created: /etc/modprobe.d/blacklist-nouveau.conf
-          
-          {% if nouveau_status.rc == 0 %}
-          Nouveau is currently active. After GRUB update and reboot, verify it's disabled with:
-          lsmod | grep nouveau
-          {% else %}
-          ✅ Nouveau driver is not currently loaded.
+          ✅ Created: /etc/modprobe.d/blacklist-nvidia.conf
+          {% if nvidia_gpu_device_id.stdout is defined and nvidia_audio_device_id.stdout is defined %}
+          ✅ Created: /etc/modprobe.d/vfio-pci.conf
+             Device IDs: {{ nvidia_gpu_device_id.stdout }},{{ nvidia_audio_device_id.stdout }}
           {% endif %}
+
       tags: [config, drivers]
 
     # ========================================
@@ -424,7 +453,7 @@
           {% endif %}
           
           Press ENTER to continue to final summary...
-      when: nvidia_device_id.stdout is defined
+      when: nvidia_gpu_device_id.stdout is defined
       tags: [validation]
 
     # ========================================
@@ -434,18 +463,21 @@
       pause:
         prompt: |
           ===== SETUP SUMMARY =====
-          
+
           Platform: {{ cpu_platform.stdout | upper }}
-          {% if nvidia_device_id.stdout is defined %}
-          Target GPU: {{ nvidia_device_id.stdout }}
+          {% if nvidia_gpu_device_id.stdout is defined %}
+          Target GPU VGA: {{ nvidia_gpu_device_id.stdout }}
+          Target GPU Audio: {{ nvidia_audio_device_id.stdout | default('Not detected') }}
           {% endif %}
-          
+
           ===== COMPLETED AUTOMATICALLY =====
           ✅ Platform detection
           ✅ GPU device discovery
           ✅ Driver status check
           ✅ VFIO modules configuration (/etc/modules-load.d/vfio.conf)
           ✅ Nouveau blacklist (/etc/modprobe.d/blacklist-nouveau.conf)
+          ✅ NVIDIA driver blacklist (/etc/modprobe.d/blacklist-nvidia.conf)
+          ✅ VFIO-PCI device binding (/etc/modprobe.d/vfio-pci.conf)
           ✅ Required packages installation
           
           ===== MANUAL STEPS REQUIRED =====

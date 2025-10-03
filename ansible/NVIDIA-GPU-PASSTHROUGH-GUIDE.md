@@ -159,13 +159,13 @@ sudo vim /etc/default/grub
 GRUB_CMDLINE_LINUX_DEFAULT="quiet splash"
 
 # Change to (example - use parameters from playbook):
-GRUB_CMDLINE_LINUX_DEFAULT="quiet splash amd_iommu=on iommu=pt vfio-pci.ids=10de:2c02"
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash amd_iommu=on iommu=pt"
 ```
 
 **For Intel Systems:**
 ```bash
 # Example Intel configuration:
-GRUB_CMDLINE_LINUX_DEFAULT="quiet splash intel_iommu=on iommu=pt vfio-pci.ids=10de:2c02"
+GRUB_CMDLINE_LINUX_DEFAULT="quiet splash intel_iommu=on iommu=pt"
 ```
 
 **Apply Changes:**

@@ -436,7 +436,7 @@
       tags: [nvidia, post-deploy]
 
 - name: Post-deployment NVIDIA setup
-  hosts: "{{ target_vm }}"
+  hosts: "{{ target_vm | default('') }}"
   become: true
   gather_facts: true
   ignore_unreachable: yes
@@ -552,7 +552,7 @@
       tags: [nvidia, post-deploy]
 
 - name: Post-deployment Docker Engine setup
-  hosts: "{{ target_vm }}"
+  hosts: "{{ target_vm | default('') }}"
   become: true
   gather_facts: true
   ignore_unreachable: yes
