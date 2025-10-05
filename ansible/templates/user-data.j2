@@ -22,10 +22,6 @@ users:
 ssh_pwauth: true
 disable_root: true
 
-# Network configuration using cloud-init standard method
-network:
-  config: disabled
-
 # Write deployment-specific files
 write_files:
   - path: /etc/motd
@@ -52,7 +48,7 @@ write_files:
     permissions: '0644'
 
 
-{% if vm_config.vm_packages is defined %}
+{% if vm_config.vm_packages is defined and vm_config.vm_packages | length > 0 %}
 # Install deployment-specific packages
 packages:
 {% for package in vm_config.vm_packages %}
@@ -64,9 +60,19 @@ packages:
 runcmd:
   - echo "=== Cloud-init configuration complete ==="
   - echo "Deployment cloud-init completed for {{ vm_config.vm_name }}"
-  - echo "Static IP configured: {{ vm_config.vm_static_ip | default('192.168.122.30') }}"
+  - 'echo "Static IP configured: {{ vm_config.vm_static_ip | default("192.168.122.30") }}"'
   - echo "Password authentication enabled for vagrant user"
   - systemctl restart ssh
+{% if vm_config.shared_folders is defined and vm_config.shared_folders | length > 0 %}
+{% for folder in vm_config.shared_folders %}
+  - mkdir -p {{ folder.target }}
+  - echo "{{ folder.tag }} {{ folder.target }} virtiofs rw,nofail 0 0" >> /etc/fstab
+{% endfor %}
+  - mount -a
+{% for folder in vm_config.shared_folders %}
+  - chown vagrant:vagrant {{ folder.target }}
+{% endfor %}
+{% endif %}
 
 # Final message
 final_message: |

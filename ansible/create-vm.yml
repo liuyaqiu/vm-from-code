@@ -23,6 +23,7 @@
           - virtinst
           - virt-manager
           - virt-viewer
+          - virtiofsd
           # Networking
           - bridge-utils
           - dnsmasq

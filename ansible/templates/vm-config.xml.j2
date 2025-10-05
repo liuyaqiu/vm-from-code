@@ -22,15 +22,23 @@
     <timer name='pit' tickpolicy='delay'/>
     <timer name='hpet' present='no'/>
   </clock>
-  
+
   <on_poweroff>destroy</on_poweroff>
   <on_reboot>restart</on_reboot>
   <on_crash>destroy</on_crash>
-  
+
   <pm>
     <suspend-to-mem enabled='no'/>
     <suspend-to-disk enabled='no'/>
   </pm>
+
+{% if vm_config.shared_folders is defined and vm_config.shared_folders | length > 0 %}
+  <!-- Shared memory for virtiofs -->
+  <memoryBacking>
+    <source type='memfd'/>
+    <access mode='shared'/>
+  </memoryBacking>
+{% endif %}
   
   <devices>
     <emulator>/usr/bin/qemu-system-x86_64</emulator>
@@ -112,5 +120,16 @@
       <backend model='random'>/dev/urandom</backend>
       <address type='pci' domain='0x0000' bus='0x06' slot='0x00' function='0x0'/>
     </rng>
+
+{% if vm_config.shared_folders is defined and vm_config.shared_folders | length > 0 %}
+    <!-- Shared folders (virtiofs) -->
+{% for folder in vm_config.shared_folders %}
+    <filesystem type='mount' accessmode='passthrough'>
+      <driver type='virtiofs'/>
+      <source dir='{{ folder.source }}'/>
+      <target dir='{{ folder.tag }}'/>
+    </filesystem>
+{% endfor %}
+{% endif %}
   </devices>
 </domain>
