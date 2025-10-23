@@ -16,15 +16,17 @@ all:
           vm_memory: 4096
           vm_vcpus: 2
           vm_disk_size: "40G"
-          vm_network: "default"
-          vm_mac_address: "52:54:00:12:34:10"
           vm_os_variant: "ubuntu24.04"
           vm_autostart: false
           gpu_passthrough: false
-          # Deployment-specific cloud-init settings
-          vm_static_ip: "192.168.122.10"
-          vm_gateway: "192.168.122.1"
-          vm_dns: ["192.168.122.1", "8.8.8.8"]
+          # Bridge network configuration (connects to physical network)
+          vm_bridge: "br0"
+          vm_bridge_interface: "enp10s0"
+          host_bridge_ip: "192.168.31.6"  # Static IP for host's bridge interface
+          vm_mac_address: "52:54:00:12:34:10"
+          vm_static_ip: "192.168.31.10"
+          vm_gateway: "192.168.31.1"
+          vm_dns: ["192.168.31.1", "8.8.8.8"]
           vm_packages: []
           # Docker Engine installation
           install_docker: true
@@ -54,16 +56,19 @@ all:
           vm_memory: 8192
           vm_vcpus: 4
           vm_disk_size: "80G"
-          vm_network: "default"
+          # Bridge network configuration (connects to physical network)
+          vm_bridge: "br0"
+          vm_bridge_interface: "enp10s0"
+          host_bridge_ip: "192.168.31.6"  # Static IP for host's bridge interface
           vm_mac_address: "52:54:00:12:34:11"
           vm_os_variant: "ubuntu24.04"
           vm_autostart: false
           # NVIDIA RTX A6000 GPU passthrough (uncomment when needed)
           gpu_passthrough: true # Change to true when GPU is configured
           gpu_device_id: "0000:01:00.0"
-          vm_static_ip: "192.168.122.11"
-          vm_gateway: "192.168.122.1"
-          vm_dns: ["192.168.122.1", "8.8.8.8"]
+          vm_static_ip: "192.168.31.11"
+          vm_gateway: "192.168.31.1"
+          vm_dns: ["192.168.31.1", "8.8.8.8"]
           vm_packages: []
           # NVIDIA driver and CUDA installation
           install_nvidia: true

@@ -22,6 +22,7 @@ help:
 	@echo "  restart VM=name- Restart VM"
 	@echo "  destroy VM=name- Destroy VM completely"
 	@echo "  destroy-all VM=name - Destroy VM and clean up base image (affects all VMs)"
+	@echo "  delete-bridge VM=name - Delete bridge network and restore physical interface"
 	@echo "  ssh [VM=name]  - SSH into VM using SSH key (default: ubuntu-dev)"
 	@echo "  ssh-pass [VM=name] - SSH into VM using password (default: ubuntu-dev)"
 	@echo ""
@@ -131,6 +132,16 @@ force-stop:
 		exit 1; \
 	fi
 	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=force-stop --ask-become-pass
+
+# Delete bridge network
+delete-bridge:
+	@if [ -z "$(VM)" ]; then \
+		echo "Error: Please specify VM name. Usage: make delete-bridge VM=ubuntu-dev"; \
+		exit 1; \
+	fi
+	@echo "WARNING: This will delete the bridge network and restore the physical interface!"
+	@read -p "Are you sure? (y/N) " confirm && [ "$$confirm" = "y" ]
+	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=delete-bridge --ask-become-pass
 
 # SSH into VM using SSH key (default: ubuntu-dev)
 ssh:

@@ -60,6 +60,7 @@
         name: "{{ vm_config.vm_name }}"
         uri: "{{ libvirt_uri | default('qemu:///system') }}"
       register: vm_status
+      when: action != 'delete-bridge'
       tags: status
 
     - name: Display VM status
@@ -67,4 +68,58 @@
         seconds: 1
         prompt: |
           VM '{{ vm_config.vm_name }}' is {{ vm_status.status }}
+      when: action != 'delete-bridge'
       tags: status
+
+    - name: Delete bridge network from host
+      block:
+        - name: Check if VM uses a bridge
+          fail:
+            msg: "VM '{{ vm_config.vm_name }}' does not use a bridge network"
+          when: vm_config.vm_bridge is not defined
+
+        - name: Check if netplan config exists
+          stat:
+            path: /etc/netplan/01-{{ vm_config.vm_bridge }}.yaml
+          register: netplan_config_stat
+
+        - name: Get bridge interface details
+          command: ip link show {{ vm_config.vm_bridge }}
+          register: bridge_info
+          ignore_errors: true
+          changed_when: false
+
+        - name: Remove netplan bridge configuration
+          file:
+            path: /etc/netplan/01-{{ vm_config.vm_bridge }}.yaml
+            state: absent
+          when: netplan_config_stat.stat.exists
+
+        - name: Restore original interface configuration
+          copy:
+            dest: /etc/netplan/01-{{ vm_config.vm_bridge }}.yaml
+            mode: '0644'
+            content: |
+              network:
+                version: 2
+                renderer: networkd
+                ethernets:
+                  {{ vm_config.vm_bridge_interface }}:
+                    dhcp4: yes
+          when:
+            - netplan_config_stat.stat.exists
+            - vm_config.vm_bridge_interface is defined
+
+        - name: Apply netplan to remove bridge
+          command: netplan apply
+          when: netplan_config_stat.stat.exists
+
+        - name: Display bridge deletion status
+          pause:
+            echo: false
+            seconds: 1
+            prompt: |
+              ✅ Bridge {{ vm_config.vm_bridge }} has been removed
+              ✅ Interface {{ vm_config.vm_bridge_interface | default('unknown') }} restored to DHCP
+      when: action == 'delete-bridge'
+      tags: delete-bridge

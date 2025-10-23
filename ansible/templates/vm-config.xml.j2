@@ -66,6 +66,16 @@
     </controller>
     
     <!-- Network Interface -->
+{% if vm_config.vm_bridge is defined %}
+    <interface type='bridge'>
+      <source bridge='{{ vm_config.vm_bridge }}'/>
+      <model type='virtio'/>
+{% if vm_config.vm_mac_address is defined %}
+      <mac address='{{ vm_config.vm_mac_address }}'/>
+{% endif %}
+      <address type='pci' domain='0x0000' bus='0x01' slot='0x00' function='0x0'/>
+    </interface>
+{% else %}
     <interface type='network'>
       <source network='{{ vm_config.vm_network | default(default_vm_network) }}'/>
       <model type='virtio'/>
@@ -74,6 +84,7 @@
 {% endif %}
       <address type='pci' domain='0x0000' bus='0x01' slot='0x00' function='0x0'/>
     </interface>
+{% endif %}
 
     <!-- Console -->
     <console type='pty'>

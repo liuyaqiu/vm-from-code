@@ -1,0 +1,18 @@
+{% if vm_config.vm_static_ip is defined %}
+# Network configuration for static IP with DHCP for routes/DNS
+version: 2
+ethernets:
+  enp1s0:
+    addresses:
+      - {{ vm_config.vm_static_ip }}/24
+    dhcp4: true
+    dhcp4-overrides:
+      use-dns: true
+      use-routes: true
+{% else %}
+# Network configuration for DHCP
+version: 2
+ethernets:
+  enp1s0:
+    dhcp4: true
+{% endif %}
