@@ -6,8 +6,6 @@ default_vm_vcpus: 2
 default_vm_disk_size: "40G"
 default_vm_network: "default"
 default_vm_os_variant: "ubuntu24.04"
-default_vm_gateway: "192.168.122.1"
-default_vm_dns: ["192.168.122.1", "8.8.8.8"]
 
 # Base image settings (updated for clean Packer cloud image)
 base_image_path: "/var/lib/libvirt/images"

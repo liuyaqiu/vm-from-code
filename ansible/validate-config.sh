@@ -13,8 +13,6 @@ vm_config:
   vm_name: "test-vm"
   vm_hostname: "test-host"
   vm_static_ip: "192.168.122.99"
-  vm_gateway: "192.168.122.1"
-  vm_dns: ["192.168.122.1", "8.8.8.8"]
   vm_memory: 2048
   vm_vcpus: 2
   vm_packages: ["htop", "curl"]
@@ -46,7 +44,7 @@ import yaml
 with open('inventory.yml', 'r') as f:
     inventory = yaml.safe_load(f)
 
-required_vars = ['vm_static_ip', 'vm_hostname', 'vm_gateway', 'vm_dns']
+required_vars = ['vm_static_ip', 'vm_hostname']
 vms = inventory['all']['children']['vms']['hosts']
 
 for vm_name, vm_config in vms.items():

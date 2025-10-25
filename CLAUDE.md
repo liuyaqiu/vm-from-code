@@ -112,8 +112,6 @@ vm-from-code/
 Configured in `ansible/inventory.yml` per VM:
 ```yaml
 vm_static_ip: "192.168.122.30"
-vm_gateway: "192.168.122.1"
-vm_dns: ["192.168.122.1", "8.8.8.8"]
 vm_mac_address: "52:54:00:12:34:30"  # For static DHCP reservation
 ```
 

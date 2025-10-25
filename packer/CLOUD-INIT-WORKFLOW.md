@@ -81,7 +81,6 @@ ubuntu-gpu:
   vm_static_ip: "192.168.122.11"
   vm_memory: 4096
   vm_vcpus: 4
-  vm_dns: ["1.1.1.1", "8.8.8.8"]
 ```
 
 ## 🐛 **Debugging**

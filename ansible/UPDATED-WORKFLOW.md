@@ -42,8 +42,6 @@ Each VM now has deployment-specific settings:
 ubuntu-dev:
   vm_static_ip: "192.168.122.10"
   vm_hostname: "ubuntu-dev"
-  vm_gateway: "192.168.122.1"
-  vm_dns: ["192.168.122.1", "8.8.8.8"]
   vm_packages: ["htop", "curl", "wget"]
 ```
 
