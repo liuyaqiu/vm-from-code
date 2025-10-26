@@ -9,7 +9,7 @@ all:
     
     vms:
       hosts:
-        # Legacy VM configurations (for reference)
+        # Development VM with replica support
         ubuntu-dev:
           vm_name: "ubuntu-dev"
           vm_hostname: "ubuntu-dev"
@@ -23,11 +23,21 @@ all:
           vm_bridge: "br0"
           vm_bridge_interface: "enp10s0"
           host_bridge_ip: "192.168.88.9"  # Static IP for host's bridge interface
-          vm_mac_address: "52:54:00:12:34:10"
-          vm_static_ip: "192.168.88.10"
+          # Replica configuration - create multiple VMs with same config
+          replicas: 4  # Number of VM instances to create
+          vm_mac_addresses:
+            - "52:54:00:12:34:10"
+            - "52:54:00:12:34:11"
+            - "52:54:00:12:34:12"
+            - "52:54:00:12:34:13"
+          vm_static_ips:
+            - "192.168.88.10"
+            - "192.168.88.11"
+            - "192.168.88.12"
+            - "192.168.88.13"
           vm_packages: []
           # Docker Engine installation
-          install_docker: true
+          install_docker: false
           # Custom deb packages to install
           custom_packages:
             - url: "https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-amd64.deb"
@@ -46,6 +56,9 @@ all:
           #   - source: "/home/user/projects"
           #     target: "/mnt/projects"
           #     tag: "projects"
+          #
+          # NOTE: VMs will be named as ubuntu-dev-0, ubuntu-dev-1, ubuntu-dev-2
+          # For single VM, set replicas: 1 or omit the replicas field
 
         # GPU passthrough VMs (disabled by default, see GPU-PASSTHROUGH-AMD.md)
         ubuntu-gpu:

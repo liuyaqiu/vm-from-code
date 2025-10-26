@@ -1,10 +1,11 @@
-{% if vm_config.vm_static_ip is defined %}
+{% set config = replica_config | default(vm_config) %}
+{% if config.vm_static_ip is defined %}
 # Network configuration for static IP with DHCP for routes/DNS
 version: 2
 ethernets:
   enp1s0:
     addresses:
-      - {{ vm_config.vm_static_ip }}/24
+      - {{ config.vm_static_ip }}/24
     dhcp4: true
     dhcp4-overrides:
       use-dns: true

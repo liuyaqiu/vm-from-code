@@ -1,0 +1,83 @@
+---
+# This task file destroys a single VM instance
+# Called by destroy-vm-replicas.yml for each replica
+# Follows the same logic as destroy-vm.yml but for individual VMs
+
+- name: "Check if {{ replica_vm_name }} exists"
+  community.libvirt.virt:
+    command: status
+    name: "{{ replica_vm_name }}"
+    uri: "{{ libvirt_uri | default('qemu:///system') }}"
+  register: vm_status
+  ignore_errors: true
+  tags: check
+
+- name: "Destroy {{ replica_vm_name }} if it exists"
+  block:
+    - name: "Stop {{ replica_vm_name }} if running (graceful shutdown)"
+      community.libvirt.virt:
+        name: "{{ replica_vm_name }}"
+        state: shutdown
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      when: vm_status is succeeded and vm_status.status == 'running'
+      ignore_errors: true
+      tags: stop
+
+    - name: Wait for graceful shutdown
+      wait_for:
+        timeout: 10
+      when: vm_status is succeeded and vm_status.status == 'running'
+      delegate_to: localhost
+      become: false
+      tags: stop
+
+    - name: "Force destroy {{ replica_vm_name }} if still running"
+      community.libvirt.virt:
+        name: "{{ replica_vm_name }}"
+        state: destroyed
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      when: vm_status is succeeded
+      ignore_errors: true
+      tags: destroy
+
+    - name: "Undefine {{ replica_vm_name }}"
+      community.libvirt.virt:
+        command: undefine
+        name: "{{ replica_vm_name }}"
+        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+      when: vm_status is succeeded
+      ignore_errors: true
+      tags: undefine
+
+    - name: "Remove {{ replica_vm_name }} disk"
+      file:
+        path: "{{ base_image_path }}/{{ replica_vm_name }}.qcow2"
+        state: absent
+      tags: cleanup
+
+    - name: "Remove {{ replica_vm_name }} cloud-init ISO"
+      file:
+        path: "{{ base_image_path }}/{{ replica_vm_name }}-cloud-init.iso"
+        state: absent
+      tags: cleanup
+
+    - name: "Remove {{ replica_vm_name }} XML configuration"
+      file:
+        path: "/tmp/{{ replica_vm_name }}.xml"
+        state: absent
+      tags: cleanup
+
+    - name: "Remove {{ replica_vm_name }} cloud-init directory"
+      file:
+        path: "/tmp/cloud-init-{{ replica_vm_name }}"
+        state: absent
+      tags: cleanup
+
+    - name: "Display destruction status for {{ replica_vm_name }}"
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ✅ VM '{{ replica_vm_name }}' has been destroyed and cleaned up.
+      tags: info
+  when: vm_status is succeeded

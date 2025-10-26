@@ -1,0 +1,64 @@
+---
+- name: Destroy VM replicas
+  hosts: libvirt_hosts
+  become: true
+  gather_facts: false
+
+  vars:
+    vm_config: "{{ hostvars[target_vm] }}"
+    replicas: "{{ vm_config.replicas | default(1) }}"
+
+  tasks:
+    - name: Display destruction plan
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ⚠️  VM Destruction Plan:
+          Base VM: {{ target_vm }}
+          Replicas: {{ replicas }}
+          {% if replicas | int > 1 %}
+          Will destroy VMs:
+          {% for i in range(replicas | int) %}
+          - {{ vm_config.vm_name }}-{{ i }}
+          {% endfor %}
+          {% else %}
+          Will destroy VM: {{ vm_config.vm_name }}
+          {% endif %}
+
+    - name: Destroy replica VMs
+      include_tasks: destroy-single-vm.yml
+      loop: "{{ range(replicas | int) | list }}"
+      loop_control:
+        loop_var: replica_index
+      vars:
+        replica_vm_name: "{{ vm_config.vm_name }}{% if replicas | int > 1 %}-{{ replica_index }}{% endif %}"
+
+    - name: Remove base image (only when explicitly requested)
+      file:
+        path: "{{ base_image_path }}/{{ base_image_name }}"
+        state: absent
+      when: cleanup_base_image | default(false) | bool
+      tags: cleanup
+
+    - name: Display completion summary
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ✅ All VM replicas destroyed successfully!
+
+          {% if replicas | int > 1 %}
+          Destroyed VMs:
+          {% for i in range(replicas | int) %}
+          - {{ vm_config.vm_name }}-{{ i }}
+          {% endfor %}
+          {% else %}
+          Destroyed VM: {{ vm_config.vm_name }}
+          {% endif %}
+
+          {% if cleanup_base_image | default(false) | bool %}
+
+          ⚠️  Base image '{{ base_image_name }}' was also removed!
+          This affects ALL VMs using this base image.
+          {% endif %}

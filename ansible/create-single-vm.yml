@@ -1,0 +1,261 @@
+---
+# This task file creates a single VM instance
+# Called by create-vm-replicas.yml for each replica
+# Follows the same logic as create-vm.yml but for individual VMs
+
+- name: Check if source image exists
+  stat:
+    path: "{{ source_image_path }}"
+  register: source_image_stat
+  tags: image
+
+- name: Copy source image to libvirt images directory
+  copy:
+    src: "{{ source_image_path }}"
+    dest: "{{ base_image_path }}/{{ base_image_name }}"
+    mode: '0644'
+    remote_src: true
+  when: source_image_stat.stat.exists
+  tags: image
+
+- name: "Create VM disk from base image for {{ replica_vm_name }}"
+  copy:
+    src: "{{ base_image_path }}/{{ base_image_name }}"
+    dest: "{{ base_image_path }}/{{ replica_vm_name }}.qcow2"
+    mode: '0644'
+    remote_src: true
+  tags: disk
+
+- name: "Get current disk info for {{ replica_vm_name }}"
+  command: qemu-img info --output json {{ base_image_path }}/{{ replica_vm_name }}.qcow2
+  register: disk_info
+  changed_when: false
+  tags: disk
+
+- name: "Parse disk info for {{ replica_vm_name }}"
+  set_fact:
+    current_virtual_size: "{{ (disk_info.stdout | from_json)['virtual-size'] }}"
+    target_size_bytes: "{{ vm_config.vm_disk_size | default(default_vm_disk_size) | regex_replace('G$', '') | int * 1024 * 1024 * 1024 }}"
+  tags: disk
+
+- name: "Resize VM disk for {{ replica_vm_name }} (only if target is larger)"
+  command: >
+    qemu-img resize
+    {{ base_image_path }}/{{ replica_vm_name }}.qcow2
+    {{ vm_config.vm_disk_size | default(default_vm_disk_size) }}
+  when: target_size_bytes | int > current_virtual_size | int
+  tags: disk
+
+- name: "Display disk size info for {{ replica_vm_name }}"
+  pause:
+    echo: false
+    seconds: 1
+    prompt: |
+      {{ replica_vm_name }} disk info:
+      Current virtual size: {{ (current_virtual_size | int / 1024 / 1024 / 1024) | round(1) }}G
+      Target size: {{ vm_config.vm_disk_size | default(default_vm_disk_size) }}
+      {% if target_size_bytes | int > current_virtual_size | int %}
+      ✅ Disk will be resized to {{ vm_config.vm_disk_size | default(default_vm_disk_size) }}
+      {% else %}
+      ℹ️  Disk size unchanged (target not larger than current)
+      {% endif %}
+  tags: disk
+
+- name: "Create cloud-init config directory for {{ replica_vm_name }}"
+  file:
+    path: "/tmp/cloud-init-{{ replica_vm_name }}"
+    state: directory
+    mode: '0755'
+  tags: cloud-init
+
+- name: Read SSH public key content
+  slurp:
+    src: "{{ vm_ssh_public_key_path }}"
+  register: ssh_public_key_content
+  delegate_to: localhost
+  become: false
+  tags: cloud-init
+
+- name: Set SSH key content as a separate variable
+  set_fact:
+    vm_ssh_key: "{{ ssh_public_key_content.content | b64decode | trim }}"
+  tags: cloud-init
+
+- name: "Generate cloud-init user-data for {{ replica_vm_name }}"
+  template:
+    src: user-data.j2
+    dest: "/tmp/cloud-init-{{ replica_vm_name }}/user-data"
+    mode: '0644'
+  tags: cloud-init
+  vars:
+    # Override variables for this replica
+    replica_config:
+      vm_name: "{{ replica_vm_name }}"
+      vm_hostname: "{{ replica_hostname }}"
+      vm_static_ip: "{{ replica_static_ip }}"
+      vm_mac_address: "{{ replica_mac_address }}"
+
+- name: "Generate cloud-init meta-data for {{ replica_vm_name }}"
+  template:
+    src: meta-data.j2
+    dest: "/tmp/cloud-init-{{ replica_vm_name }}/meta-data"
+    mode: '0644'
+  tags: cloud-init
+  vars:
+    replica_config:
+      vm_name: "{{ replica_vm_name }}"
+      vm_hostname: "{{ replica_hostname }}"
+
+- name: "Generate cloud-init network-config for {{ replica_vm_name }}"
+  template:
+    src: network-config.j2
+    dest: "/tmp/cloud-init-{{ replica_vm_name }}/network-config"
+    mode: '0644'
+  tags: cloud-init
+  vars:
+    replica_config:
+      vm_static_ip: "{{ replica_static_ip }}"
+      vm_mac_address: "{{ replica_mac_address }}"
+
+- name: "Create cloud-init ISO for {{ replica_vm_name }}"
+  command: >
+    genisoimage -output /var/lib/libvirt/images/{{ replica_vm_name }}-cloud-init.iso
+    -volid cidata -joliet -r
+    /tmp/cloud-init-{{ replica_vm_name }}/user-data
+    /tmp/cloud-init-{{ replica_vm_name }}/meta-data
+    /tmp/cloud-init-{{ replica_vm_name }}/network-config
+  tags: cloud-init
+
+- name: "Generate VM XML configuration for {{ replica_vm_name }}"
+  template:
+    src: vm-config.xml.j2
+    dest: "/tmp/{{ replica_vm_name }}.xml"
+    mode: '0644'
+  tags: xml
+  vars:
+    replica_config:
+      vm_name: "{{ replica_vm_name }}"
+      vm_hostname: "{{ replica_hostname }}"
+      vm_memory: "{{ vm_config.vm_memory }}"
+      vm_vcpus: "{{ vm_config.vm_vcpus }}"
+      vm_mac_address: "{{ replica_mac_address }}"
+
+- name: "Define VM {{ replica_vm_name }}"
+  community.libvirt.virt:
+    command: define
+    xml: "{{ lookup('file', '/tmp/' + replica_vm_name + '.xml') }}"
+    uri: "{{ libvirt_uri | default('qemu:///system') }}"
+  tags: define
+
+- name: "Set {{ replica_vm_name }} autostart"
+  community.libvirt.virt:
+    name: "{{ replica_vm_name }}"
+    autostart: "{{ vm_config.vm_autostart | default(false) }}"
+    uri: "{{ libvirt_uri | default('qemu:///system') }}"
+  tags: autostart
+
+- name: "Validate GPU passthrough setup for {{ replica_vm_name }} (if GPU VM)"
+  block:
+    - name: Check if GPU device is bound to vfio-pci
+      shell: |
+        if [ -d "/sys/bus/pci/devices/{{ vm_config.gpu_device_id }}/driver" ]; then
+          driver=$(basename $(readlink /sys/bus/pci/devices/{{ vm_config.gpu_device_id }}/driver))
+          echo "$driver"
+        else
+          echo "no_driver"
+        fi
+      register: gpu_driver
+      changed_when: false
+
+    - name: Check IOMMU group viability
+      shell: |
+        iommu_group=$(basename $(readlink /sys/bus/pci/devices/{{ vm_config.gpu_device_id }}/iommu_group))
+        echo "IOMMU_GROUP:$iommu_group"
+        all_vfio=true
+        for device in /sys/kernel/iommu_groups/$iommu_group/devices/*; do
+          device_id=$(basename $device)
+          if [ -d "$device/driver" ]; then
+            driver=$(basename $(readlink $device/driver))
+          else
+            driver="no_driver"
+          fi
+          echo "DEVICE:$device_id:$driver"
+          if [ "$driver" != "vfio-pci" ]; then
+            all_vfio=false
+          fi
+        done
+        if [ "$all_vfio" = true ]; then
+          echo "STATUS:OK"
+        else
+          echo "STATUS:FAIL"
+        fi
+      register: iommu_group_info
+      changed_when: false
+
+    - name: Parse IOMMU group information
+      set_fact:
+        iommu_group_number: "{{ iommu_group_info.stdout_lines | select('match', '^IOMMU_GROUP:') | first | regex_replace('^IOMMU_GROUP:', '') }}"
+        iommu_devices: "{{ iommu_group_info.stdout_lines | select('match', '^DEVICE:') | map('regex_replace', '^DEVICE:', '') | list }}"
+        iommu_status: "{{ iommu_group_info.stdout_lines | select('match', '^STATUS:') | first | regex_replace('^STATUS:', '') }}"
+
+    - name: Display IOMMU group information
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          IOMMU Group {{ iommu_group_number }} contains:
+          {% for device_info in iommu_devices %}
+          {% set parts = device_info.split(':') %}
+          - {{ parts[0] }} -> {{ parts[1] }}
+          {% endfor %}
+
+    - name: Fail if IOMMU group is not viable
+      fail:
+        msg: |
+          ❌ GPU passthrough is not properly configured!
+
+          GPU Device: {{ vm_config.gpu_device_id }}
+          IOMMU Group: {{ iommu_group_number }}
+
+          All devices in IOMMU Group {{ iommu_group_number }} must be bound to vfio-pci:
+          {% for device_info in iommu_devices %}
+          {% set parts = device_info.split(':') %}
+          - {{ parts[0] }}: {{ parts[1] }} {% if parts[1] != 'vfio-pci' %}❌{% else %}✅{% endif %}
+          {% endfor %}
+
+          To fix this issue, you must bind ALL devices in the IOMMU group to vfio-pci:
+
+          {% for device_info in iommu_devices %}
+          {% set parts = device_info.split(':') %}
+          {% if parts[1] != 'vfio-pci' %}
+          # Unbind {{ parts[0] }} from {{ parts[1] }}
+          echo "{{ parts[0] }}" | sudo tee /sys/bus/pci/drivers/{{ parts[1] }}/unbind
+
+          # Bind {{ parts[0] }} to vfio-pci
+          echo "vfio-pci" | sudo tee /sys/bus/pci/devices/{{ parts[0] }}/driver_override
+          echo "{{ parts[0] }}" | sudo tee /sys/bus/pci/drivers/vfio-pci/bind
+          {% endif %}
+          {% endfor %}
+
+          Or see ansible/NVIDIA-GPU-PASSTHROUGH-GUIDE.md for detailed setup steps.
+      when: iommu_status != "OK"
+  when: vm_config.gpu_passthrough | default(false) | bool
+  tags: [gpu-validation, start]
+
+- name: "Start VM {{ replica_vm_name }}"
+  community.libvirt.virt:
+    name: "{{ replica_vm_name }}"
+    state: running
+    uri: "{{ libvirt_uri | default('qemu:///system') }}"
+  tags: start
+
+- name: "Display VM information for {{ replica_vm_name }}"
+  pause:
+    echo: false
+    seconds: 1
+    prompt: |
+      ✅ VM '{{ replica_vm_name }}' has been created and started.
+      IP: {{ replica_static_ip }}
+      Connect via VNC: virt-viewer {{ replica_vm_name }}
+      Or use SSH once the VM is fully booted: ssh {{ vm_ssh_user }}@{{ replica_static_ip }}
+  tags: info

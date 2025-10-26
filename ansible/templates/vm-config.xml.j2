@@ -1,8 +1,9 @@
+{% set config = replica_config | default(vm_config) %}
 <domain type='kvm'>
-  <name>{{ vm_config.vm_name }}</name>
-  <memory unit='KiB'>{{ (vm_config.vm_memory | default(default_vm_memory)) * 1024 }}</memory>
-  <currentMemory unit='KiB'>{{ (vm_config.vm_memory | default(default_vm_memory)) * 1024 }}</currentMemory>
-  <vcpu placement='static'>{{ vm_config.vm_vcpus | default(default_vm_vcpus) }}</vcpu>
+  <name>{{ config.vm_name }}</name>
+  <memory unit='KiB'>{{ (config.vm_memory | default(vm_config.vm_memory) | default(default_vm_memory)) * 1024 }}</memory>
+  <currentMemory unit='KiB'>{{ (config.vm_memory | default(vm_config.vm_memory) | default(default_vm_memory)) * 1024 }}</currentMemory>
+  <vcpu placement='static'>{{ config.vm_vcpus | default(vm_config.vm_vcpus) | default(default_vm_vcpus) }}</vcpu>
   
   <os>
     <type arch='x86_64' machine='pc-q35-6.2'>hvm</type>
@@ -46,15 +47,15 @@
     <!-- Disk -->
     <disk type='file' device='disk'>
       <driver name='qemu' type='qcow2'/>
-      <source file='{{ base_image_path }}/{{ vm_config.vm_name }}.qcow2'/>
+      <source file='{{ base_image_path }}/{{ config.vm_name }}.qcow2'/>
       <target dev='vda' bus='virtio'/>
       <address type='pci' domain='0x0000' bus='0x04' slot='0x00' function='0x0'/>
     </disk>
-    
+
     <!-- Cloud-init ISO -->
     <disk type='file' device='cdrom'>
       <driver name='qemu' type='raw'/>
-      <source file='{{ base_image_path }}/{{ vm_config.vm_name }}-cloud-init.iso'/>
+      <source file='{{ base_image_path }}/{{ config.vm_name }}-cloud-init.iso'/>
       <target dev='sda' bus='sata'/>
       <readonly/>
       <address type='drive' controller='0' bus='0' target='0' unit='0'/>
@@ -70,8 +71,8 @@
     <interface type='bridge'>
       <source bridge='{{ vm_config.vm_bridge }}'/>
       <model type='virtio'/>
-{% if vm_config.vm_mac_address is defined %}
-      <mac address='{{ vm_config.vm_mac_address }}'/>
+{% if config.vm_mac_address is defined %}
+      <mac address='{{ config.vm_mac_address }}'/>
 {% endif %}
       <address type='pci' domain='0x0000' bus='0x01' slot='0x00' function='0x0'/>
     </interface>
@@ -79,8 +80,8 @@
     <interface type='network'>
       <source network='{{ vm_config.vm_network | default(default_vm_network) }}'/>
       <model type='virtio'/>
-{% if vm_config.vm_mac_address is defined %}
-      <mac address='{{ vm_config.vm_mac_address }}'/>
+{% if config.vm_mac_address is defined %}
+      <mac address='{{ config.vm_mac_address }}'/>
 {% endif %}
       <address type='pci' domain='0x0000' bus='0x01' slot='0x00' function='0x0'/>
     </interface>
