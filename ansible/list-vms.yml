@@ -37,10 +37,17 @@
         prompt: |
           Total VMs: {{ all_vms.list_vms | length }}
           Running VMs: {{ running_vms.list_vms | length }}
-          
+
           VM Details:
-          {% for vm in vm_details.results %}
-          - {{ vm.item }}: {{ vm.status | default('unknown') }}
+          {% for vm_item_result in vm_details.results -%}
+          {% set vm_data = vm_item_result[vm_item_result.item] -%}
+          - Name: {{ vm_item_result.item }}
+            State: {{ vm_data.state | default('N/A') }}
+            Memory: {{ (vm_data.memory | int / 1024 / 1024) | round(2) | default('N/A') }} GB
+            VCPUs: {{ vm_data.nrVirtCpu | default('N/A') }}
+            Autostart: {{ vm_data.autostart | default('N/A') }}
+            CPU Time: {{ (vm_data.cpuTime | int / 1000000000) | round(2) | default('N/A') }} seconds
+
           {% endfor %}
       when: all_vms.list_vms | length > 0
       tags: summary
