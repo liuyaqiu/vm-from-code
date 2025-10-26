@@ -62,7 +62,6 @@ FILES=(
     "templates/meta-data.j2" 
     "templates/vm-config.xml.j2"
     "inventory.yml"
-    "create-vm.yml"
     "group_vars/all.yml"
 )
 

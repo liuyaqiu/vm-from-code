@@ -1,7 +1,6 @@
 ---
 # This task file creates a single VM instance
 # Called by create-vm-replicas.yml for each replica
-# Follows the same logic as create-vm.yml but for individual VMs
 
 - name: Check if source image exists
   stat:

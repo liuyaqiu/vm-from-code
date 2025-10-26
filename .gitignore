@@ -115,3 +115,6 @@ coverage/
 local.pkrvars.hcl
 *.local.pkrvars.hcl
 config.local.*
+
+# mise
+requirements.lock

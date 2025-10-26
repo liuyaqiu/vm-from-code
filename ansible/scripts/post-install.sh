@@ -14,6 +14,9 @@ echo "deb [signed-by=/etc/apt/keyrings/mise-archive-keyring.gpg arch=amd64] http
 sudo apt update
 sudo apt install -y mise
 
+echo "Upgrade packages..."
+sudo apt update
+sudo apt upgrade -y
 
 echo "========================================="
 echo "Post-Installation Verification Script"

@@ -575,6 +575,24 @@
             state: absent
           when: post_install_script | default('') | length > 0
 
+        - name: Display pre-reboot message
+          pause:
+            echo: false
+            seconds: 1
+            prompt: |
+              ✅ post-install script run successfully on {{ inventory_hostname }}
+              🔄 Rebooting VM...
+
+        - name: Reboot VM after post-install
+          reboot:
+            reboot_timeout: 600
+            msg: "Rebooting after post-install"
+
+        - name: Wait for VM to come back online after reboot
+          wait_for_connection:
+            delay: 10
+            timeout: 300
+
       rescue:
         - name: Display post-installation script failure
           fail:

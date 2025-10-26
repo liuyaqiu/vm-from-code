@@ -6,6 +6,16 @@ uv = "latest"
 _.python.venv = { path = ".venv", create = true }
 UV_PROJECT_ENVIRONMENT = ".venv"
 
+# Task 1: Refresh the lock file
+[tasks.refresh-lock]
+description = "Refresh the Python dependency lock file (requirements.lock) using uv"
+# uv pip compile reads requirements.txt and writes a locked set of dependencies to requirements.lock
+run = "uv pip compile --output-file requirements.lock requirements.txt"
+
+# Task 2: Install dependencies from the lock file
 [tasks.install-deps]
-description = "Install Python dependencies using uv"
-run = "uv pip install -r requirements.txt"
+description = "Install Python dependencies from the lock file (requirements.lock) using uv"
+# This line makes 'refresh-lock' run before 'install-deps'
+depends = ["refresh-lock"]
+# uv pip sync installs exactly what's specified in requirements.lock
+run = "uv pip sync requirements.lock"

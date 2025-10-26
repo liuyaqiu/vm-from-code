@@ -1,0 +1,116 @@
+---
+- name: Setup libvirt host environment
+  hosts: libvirt_hosts
+  become: true
+  gather_facts: true
+
+  tasks:
+    - name: Install required system packages
+      package:
+        name:
+          # Libvirt and virtualization
+          - libvirt-daemon-system
+          - libvirt-clients
+          - libvirt-dev
+          # QEMU/KVM
+          - qemu-kvm
+          - qemu-utils
+          - qemu-system-x86
+          # VM management tools
+          - virtinst
+          - virt-manager
+          - virt-viewer
+          - virtiofsd
+          # Networking
+          - bridge-utils
+          - dnsmasq
+          # Cloud-init ISO creation
+          - genisoimage
+          # Python development headers (needed for libvirt-python and lxml)
+          - python3-dev
+          - gcc
+          - pkg-config
+          # XML libraries (needed for lxml)
+          - libxml2-dev
+          - libxslt1-dev
+          - zlib1g-dev
+        state: present
+      tags: setup
+
+    - name: Ensure libvirtd service is running
+      systemd:
+        name: libvirtd
+        state: started
+        enabled: true
+      tags: setup
+
+    - name: Add current user to libvirt group
+      user:
+        name: "{{ ansible_user_id }}"
+        groups: libvirt
+        append: true
+      tags: setup
+
+    - name: Create base images directory
+      file:
+        path: "{{ base_image_path }}"
+        state: directory
+        mode: '0755'
+      tags: setup
+
+    - name: Create secrets directory
+      file:
+        path: "../secrets"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      become: false
+      tags: setup
+
+    - name: Check if SSH key already exists
+      stat:
+        path: "{{ vm_ssh_key_path }}"
+      delegate_to: localhost
+      become: false
+      register: ssh_key_stat
+      tags: setup
+
+    - name: Generate ed25519 SSH key for VMs
+      command: >
+        ssh-keygen -t ed25519
+        -f {{ vm_ssh_key_path }}
+        -N ""
+        -C "libvirt-vms-key"
+      delegate_to: localhost
+      become: false
+      when: not ssh_key_stat.stat.exists
+      tags: setup
+
+    - name: Display SSH key information
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          {% if ssh_key_stat.stat.exists %}
+          ✅ SSH key already exists: {{ vm_ssh_key_path }}
+          {% else %}
+          ✅ Generated new SSH key: {{ vm_ssh_key_path }}
+          {% endif %}
+          Public key: {{ vm_ssh_public_key_path }}
+      delegate_to: localhost
+      become: false
+      tags: setup
+
+    - name: Display setup completion message
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ✅ Libvirt host environment setup completed!
+
+          Next steps:
+          1. Build base image: make build-image
+          2. Create VM: make create VM=ubuntu-dev
+
+          Note: You may need to log out and back in for libvirt group membership to take effect.
+      tags: setup

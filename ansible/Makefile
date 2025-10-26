@@ -1,6 +1,6 @@
 # Ansible libvirt VM Management Makefile
 
-.PHONY: help install setup list create start stop restart destroy gpu-setup build-image cloud-vm ssh ssh-pass
+.PHONY: help install setup list create start stop restart destroy gpu-setup build-image ssh ssh-pass
 
 # Default target
 help:
@@ -16,7 +16,6 @@ help:
 	@echo "  === VM Management ==="
 	@echo "  list           - List all VMs and their status"
 	@echo "  create VM=name - Create and start VM(s) (supports replicas, e.g., make create VM=ubuntu-dev)"
-	@echo "  cloud-vm       - Quick create cloud VM for development (uses ubuntu-dev)"
 	@echo "  start VM=name  - Start VM"
 	@echo "  stop VM=name   - Stop VM gracefully"
 	@echo "  restart VM=name- Restart VM"
@@ -33,7 +32,6 @@ help:
 	@echo "  1. make install        # First time setup"
 	@echo "  2. make setup          # Setup libvirt + static DHCP network"
 	@echo "  3. make build-image    # Build clean base image with reset cloud-init"
-	@echo "  4. make cloud-vm       # Deploy VM with environment-specific cloud-init"
 	@echo "  help           - Show this help message"
 
 # Install Ansible and required collections
@@ -44,7 +42,7 @@ install:
 
 # Setup libvirt environment
 setup:
-	ansible-playbook -i inventory.yml create-vm.yml --tags setup,network --ask-become-pass
+	ansible-playbook -i inventory.yml setup.yml --ask-become-pass
 
 # Build clean base image with Packer (NEW WORKFLOW)
 build-image:
@@ -54,15 +52,6 @@ build-image:
 	@echo "✅ Clean base image built successfully!"
 	@echo "Image location: ../builds/ubuntu-24.04-server.qcow2"
 	@echo "Cloud-init state has been reset - ready for deployment-specific configuration"
-
-# Quick cloud VM creation for development (NEW WORKFLOW)
-cloud-vm:
-	@echo "Deploying development VM with environment-specific cloud-init..."
-	@echo "Using clean base image with deployment-time network configuration"
-	ansible-playbook -i inventory.yml create-vm.yml -e target_vm=ubuntu-dev --ask-become-pass
-	@echo "✅ VM 'ubuntu-dev' deployed with static IP!"
-	@echo "Connect with: ssh vagrant@192.168.122.10 (password: vagrant)"
-	@echo "Or use VNC: virt-viewer ubuntu-dev"
 
 # List all VMs
 list:
