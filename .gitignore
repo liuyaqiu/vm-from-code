@@ -118,3 +118,5 @@ config.local.*
 
 # mise
 requirements.lock
+
+**/credentials

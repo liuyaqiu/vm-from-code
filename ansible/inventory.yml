@@ -10,9 +10,9 @@ all:
     vms:
       hosts:
         # Development VM with replica support
-        ubuntu-dev:
-          vm_name: "ubuntu-dev"
-          vm_hostname: "ubuntu-dev"
+        k8s-master:
+          vm_name: "k8s-master"
+          vm_hostname: "k8s-master"
           vm_memory: 4096
           vm_vcpus: 2
           vm_disk_size: "40G"
@@ -24,17 +24,15 @@ all:
           vm_bridge_interface: "enp10s0"
           host_bridge_ip: "192.168.88.9"  # Static IP for host's bridge interface
           # Replica configuration - create multiple VMs with same config
-          replicas: 4  # Number of VM instances to create
+          replicas: 3  # Number of VM instances to create
           vm_mac_addresses:
             - "52:54:00:12:34:10"
             - "52:54:00:12:34:11"
             - "52:54:00:12:34:12"
-            - "52:54:00:12:34:13"
           vm_static_ips:
             - "192.168.88.10"
             - "192.168.88.11"
             - "192.168.88.12"
-            - "192.168.88.13"
           vm_packages: []
           # Docker Engine installation
           install_docker: false
@@ -51,14 +49,84 @@ all:
             - source: "/home/liuyaqiu/code"
               target: "/home/vagrant/shared-folders/code"
               tag: "code"
-          # Example:
-          # shared_folders:
-          #   - source: "/home/user/projects"
-          #     target: "/mnt/projects"
-          #     tag: "projects"
-          #
-          # NOTE: VMs will be named as ubuntu-dev-0, ubuntu-dev-1, ubuntu-dev-2
-          # For single VM, set replicas: 1 or omit the replicas field
+        k8s-etcd:
+          vm_name: "k8s-etcd"
+          vm_hostname: "k8s-etcd"
+          vm_memory: 4096
+          vm_vcpus: 2
+          vm_disk_size: "40G"
+          vm_os_variant: "ubuntu24.04"
+          vm_autostart: true
+          gpu_passthrough: false
+          # Bridge network configuration (connects to physical network)
+          vm_bridge: "br0"
+          vm_bridge_interface: "enp10s0"
+          host_bridge_ip: "192.168.88.9"  # Static IP for host's bridge interface
+          # Replica configuration - create multiple VMs with same config
+          replicas: 3  # Number of VM instances to create
+          vm_mac_addresses:
+            - "52:54:00:12:34:13"
+            - "52:54:00:12:34:14"
+            - "52:54:00:12:34:15"
+          vm_static_ips:
+            - "192.168.88.13"
+            - "192.168.88.14"
+            - "192.168.88.15"
+          vm_packages: []
+          # Docker Engine installation
+          install_docker: false
+          # Custom deb packages to install
+          custom_packages:
+            - url: "https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-amd64.deb"
+              name: "bazelisk-amd64.deb"
+            - url: "https://github.com/fastfetch-cli/fastfetch/releases/download/2.53.0/fastfetch-linux-amd64.deb"
+              name: "fastfetch-linux-amd64.deb"
+          # Post-installation script (optional)
+          post_install_script: "scripts/post-install.sh"
+          # Shared folders between host and VM (virtiofs)
+          shared_folders:
+            - source: "/home/liuyaqiu/code"
+              target: "/home/vagrant/shared-folders/code"
+              tag: "code"
+        k8s-worker:
+          vm_name: "k8s-worker"
+          vm_hostname: "k8s-worker"
+          vm_memory: 4096
+          vm_vcpus: 2
+          vm_disk_size: "80G"
+          vm_os_variant: "ubuntu24.04"
+          vm_autostart: true
+          gpu_passthrough: false
+          # Bridge network configuration (connects to physical network)
+          vm_bridge: "br0"
+          vm_bridge_interface: "enp10s0"
+          host_bridge_ip: "192.168.88.9"  # Static IP for host's bridge interface
+          # Replica configuration - create multiple VMs with same config
+          replicas: 3  # Number of VM instances to create
+          vm_mac_addresses:
+            - "52:54:00:12:34:16"
+            - "52:54:00:12:34:17"
+            - "52:54:00:12:34:18"
+          vm_static_ips:
+            - "192.168.88.16"
+            - "192.168.88.17"
+            - "192.168.88.18"
+          vm_packages: []
+          # Docker Engine installation
+          install_docker: false
+          # Custom deb packages to install
+          custom_packages:
+            - url: "https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-amd64.deb"
+              name: "bazelisk-amd64.deb"
+            - url: "https://github.com/fastfetch-cli/fastfetch/releases/download/2.53.0/fastfetch-linux-amd64.deb"
+              name: "fastfetch-linux-amd64.deb"
+          # Post-installation script (optional)
+          post_install_script: "scripts/post-install.sh"
+          # Shared folders between host and VM (virtiofs)
+          shared_folders:
+            - source: "/home/liuyaqiu/code"
+              target: "/home/vagrant/shared-folders/code"
+              tag: "code"
 
         # GPU passthrough VMs (disabled by default, see GPU-PASSTHROUGH-AMD.md)
         ubuntu-gpu:

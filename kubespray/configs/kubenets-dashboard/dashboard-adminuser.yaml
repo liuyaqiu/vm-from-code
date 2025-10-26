@@ -1,0 +1,6 @@
+# dashboard-adminuser.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: admin-user
+  namespace: kubernetes-dashboard # Ensure this is the correct namespace for your dashboard
