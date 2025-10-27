@@ -44,11 +44,6 @@ all:
               name: "fastfetch-linux-amd64.deb"
           # Post-installation script (optional)
           post_install_script: "scripts/post-install.sh"
-          # Shared folders between host and VM (virtiofs)
-          shared_folders:
-            - source: "/home/liuyaqiu/code"
-              target: "/home/vagrant/shared-folders/code"
-              tag: "code"
         k8s-etcd:
           vm_name: "k8s-etcd"
           vm_hostname: "k8s-etcd"
@@ -83,11 +78,6 @@ all:
               name: "fastfetch-linux-amd64.deb"
           # Post-installation script (optional)
           post_install_script: "scripts/post-install.sh"
-          # Shared folders between host and VM (virtiofs)
-          shared_folders:
-            - source: "/home/liuyaqiu/code"
-              target: "/home/vagrant/shared-folders/code"
-              tag: "code"
         k8s-worker:
           vm_name: "k8s-worker"
           vm_hostname: "k8s-worker"
@@ -122,11 +112,6 @@ all:
               name: "fastfetch-linux-amd64.deb"
           # Post-installation script (optional)
           post_install_script: "scripts/post-install.sh"
-          # Shared folders between host and VM (virtiofs)
-          shared_folders:
-            - source: "/home/liuyaqiu/code"
-              target: "/home/vagrant/shared-folders/code"
-              tag: "code"
 
         # GPU passthrough VMs (disabled by default, see GPU-PASSTHROUGH-AMD.md)
         ubuntu-gpu:
@@ -168,8 +153,3 @@ all:
             - source: "/home/liuyaqiu/code"
               target: "/home/vagrant/shared-folders/code"
               tag: "code"
-          # Example:
-          # shared_folders:
-          #   - source: "/home/user/projects"
-          #     target: "/mnt/projects"
-          #     tag: "projects"

@@ -3,7 +3,6 @@
 # Configuration variables
 INVENTORY_PATH := $(CURDIR)/inventory
 SSH_PRIVATE_KEY_PATH := $(CURDIR)/../secrets/libvirt_vms_ed25519
-KUBE_CONFIG_PATH := $(CURDIR)/../secrets/kube.config
 KUBESPRAY_VERSION := v2.29.0
 CUSTOM_IMAGE_NAME := kubespray-custom
 CUSTOM_IMAGE_TAG := $(KUBESPRAY_VERSION)
@@ -20,7 +19,6 @@ help:
 	@echo "Configuration:"
 	@echo "  INVENTORY_PATH: $(INVENTORY_PATH)"
 	@echo "  SSH_PRIVATE_KEY_PATH: $(SSH_PRIVATE_KEY_PATH)"
-	@echo "  KUBE_CONFIG_PATH: $(KUBE_CONFIG_PATH)"
 	@echo "  KUBESPRAY_VERSION: $(KUBESPRAY_VERSION)"
 	@echo "  CUSTOM_IMAGE_NAME: $(CUSTOM_IMAGE_NAME)"
 	@echo "  CUSTOM_IMAGE_TAG: $(CUSTOM_IMAGE_TAG)"
@@ -43,10 +41,8 @@ bash: docker-build
 	@echo "Starting Kubespray Docker container..."
 	@echo "Inventory: $(INVENTORY_PATH)"
 	@echo "SSH Key: $(SSH_PRIVATE_KEY_PATH)"
-	@echo "Kube Config: $(KUBE_CONFIG_PATH)"
 	@echo "Using custom image: $(CUSTOM_IMAGE_NAME):$(CUSTOM_IMAGE_TAG)"
 	docker run --rm -it \
 		--mount type=bind,source=$(INVENTORY_PATH),dst=/inventory \
 		--mount type=bind,source=$(SSH_PRIVATE_KEY_PATH),dst=/root/.ssh/id_rsa \
-		--mount type=bind,source=$(KUBE_CONFIG_PATH),dst=/root/.kube/config \
 		$(CUSTOM_IMAGE_NAME):$(CUSTOM_IMAGE_TAG) bash
