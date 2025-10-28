@@ -1,0 +1,60 @@
+---
+# This task file destroys a single VM instance on Proxmox VE
+# Called by destroy-vm-replicas-pve.yml for each replica
+
+- name: "Check if VM {{ replica_vm_name }} (VMID {{ replica_vmid }}) exists"
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ pve_api_host }}"
+    api_user: "{{ pve_api_user }}"
+    api_token_id: "{{ pve_api_token_id }}"
+    api_token_secret: "{{ pve_api_token_secret }}"
+    validate_certs: false
+    node: "{{ vm_config.pve_node }}"
+    vmid: "{{ replica_vmid }}"
+  register: existing_vm
+  failed_when: false
+  tags: [check]
+
+- name: "Skip if VM doesn't exist"
+  debug:
+    msg: "VM {{ replica_vm_name }} (VMID {{ replica_vmid }}) does not exist, skipping..."
+  when: existing_vm.proxmox_vms is not defined or existing_vm.proxmox_vms | length == 0
+
+- name: "Stop and destroy VM {{ replica_vm_name }} (VMID {{ replica_vmid }})"
+  block:
+    - name: "Stop VM {{ replica_vm_name }} if running"
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ pve_api_host }}"
+        api_user: "{{ pve_api_user }}"
+        api_token_id: "{{ pve_api_token_id }}"
+        api_token_secret: "{{ pve_api_token_secret }}"
+        validate_certs: false
+        node: "{{ vm_config.pve_node }}"
+        vmid: "{{ replica_vmid }}"
+        state: stopped
+        force: true
+      when: existing_vm.proxmox_vms[0].status == 'running'
+      ignore_errors: true
+
+    - name: "Wait for VM to stop"
+      pause:
+        seconds: 5
+
+    - name: "Destroy VM {{ replica_vm_name }} (VMID {{ replica_vmid }})"
+      community.proxmox.proxmox_kvm:
+        api_host: "{{ pve_api_host }}"
+        api_user: "{{ pve_api_user }}"
+        api_token_id: "{{ pve_api_token_id }}"
+        api_token_secret: "{{ pve_api_token_secret }}"
+        validate_certs: false
+        node: "{{ vm_config.pve_node }}"
+        vmid: "{{ replica_vmid }}"
+        state: absent
+
+    - name: "Display destruction result for {{ replica_vm_name }}"
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ✅ VM '{{ replica_vm_name }}' (VMID {{ replica_vmid }}) destroyed successfully!
+  when: existing_vm.proxmox_vms is defined and existing_vm.proxmox_vms | length > 0

@@ -1,0 +1,218 @@
+---
+# This task file creates a single VM instance on Proxmox VE
+# Called by create-vm-replicas-pve.yml for each replica
+
+- name: "Validate PVE-specific requirements for {{ replica_vm_name }}"
+  assert:
+    that:
+      - vm_config.pve_node is defined
+      - vm_config.pve_storage is defined
+      - replica_vmid is defined
+      - replica_vmid | int >= 100
+      - replica_vmid | int <= 999999
+    fail_msg: |
+      Missing required PVE configuration for {{ replica_vm_name }}:
+      - pve_node: {{ vm_config.pve_node | default('NOT SET') }}
+      - pve_storage: {{ vm_config.pve_storage | default('NOT SET') }}
+      - replica_vmid: {{ replica_vmid | default('NOT SET') }}
+      VMID must be between 100 and 999999
+  tags: [validate]
+
+- name: "Check if VM {{ replica_vm_name }} (VMID {{ replica_vmid }}) already exists"
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ pve_api_host }}"
+    api_user: "{{ pve_api_user }}"
+    api_token_id: "{{ pve_api_token_id }}"
+    api_token_secret: "{{ pve_api_token_secret }}"
+    validate_certs: false
+    node: "{{ vm_config.pve_node }}"
+    vmid: "{{ replica_vmid }}"
+  register: existing_vm
+  failed_when: false
+  tags: [check]
+
+- name: "Fail if VM already exists"
+  fail:
+    msg: |
+      ❌ VM with VMID {{ replica_vmid }} already exists on node {{ vm_config.pve_node }}!
+
+      VM Name: {{ existing_vm.proxmox_vms[0].name | default('unknown') }}
+      Status: {{ existing_vm.proxmox_vms[0].status | default('unknown') }}
+
+      Please either:
+      1. Destroy the existing VM first: make ansible-destroy-pve target_vm={{ target_vm }}
+      2. Use a different VMID in inventory.yml
+  when: existing_vm.proxmox_vms is defined and existing_vm.proxmox_vms | length > 0
+  tags: [check]
+
+- name: "Generate cloud-init network configuration for {{ replica_vm_name }}"
+  set_fact:
+    pve_ipconfig: "ip={{ replica_static_ip }}/24,gw={{ vm_config.vm_gateway | default('192.168.88.1') }}"
+    pve_nameserver: "{{ vm_config.vm_nameservers | default(['8.8.8.8', '8.8.4.4']) | join(' ') }}"
+    pve_bridge: "{{ vm_config.vm_bridge | default('vmbr0') }}"
+  tags: [cloud-init]
+
+- name: "Read SSH public key for {{ replica_vm_name }}"
+  slurp:
+    src: "{{ vm_ssh_public_key_path }}"
+  register: ssh_public_key_content
+  delegate_to: localhost
+  become: false
+  tags: [cloud-init]
+
+- name: "Set SSH key content"
+  set_fact:
+    vm_ssh_key: "{{ ssh_public_key_content.content | b64decode | trim }}"
+  tags: [cloud-init]
+
+- name: "Create VM {{ replica_vm_name }} (VMID {{ replica_vmid }}) on PVE (without disk)"
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ pve_api_host }}"
+    api_user: "{{ pve_api_user }}"
+    api_token_id: "{{ pve_api_token_id }}"
+    api_token_secret: "{{ pve_api_token_secret }}"
+    validate_certs: false
+    node: "{{ vm_config.pve_node }}"
+    vmid: "{{ replica_vmid }}"
+    name: "{{ replica_vm_name }}"
+    # Resource allocation
+    memory: "{{ vm_config.vm_memory }}"
+    cores: "{{ vm_config.vm_vcpus }}"
+    cpu: "host"
+    # Operating system
+    ostype: l26  # Linux 6.x kernel
+    # BIOS and machine type
+    bios: ovmf  # UEFI
+    machine: q35
+    # SCSI controller
+    scsihw: virtio-scsi-single
+    # Network configuration - bridged network with static MAC
+    net:
+      net0: "virtio={{ replica_mac_address }},bridge={{ pve_bridge }},firewall=0"
+    # Cloud-init configuration (static IP with gateway)
+    ciuser: "{{ vm_ssh_user }}"
+    cipassword: "{{ vm_ssh_password }}"
+    sshkeys: "{{ vm_ssh_key }}"
+    ipconfig:
+      ipconfig0: "{{ pve_ipconfig }}"
+    nameservers: "{{ pve_nameserver }}"
+    # Additional options
+    agent: "enabled=1"  # QEMU guest agent
+    onboot: "{{ vm_config.vm_autostart | default(false) }}"
+    state: present
+  register: vm_create_result
+  tags: [create]
+
+- name: "Add PVE host to inventory for disk import"
+  add_host:
+    name: pve_disk_import
+    ansible_host: "{{ pve_api_host }}"
+    ansible_user: root
+    ansible_ssh_private_key_file: "{{ vm_ssh_key_path }}"
+    ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
+  tags: [create, disk]
+
+- name: "Import disk from base image using qm importdisk"
+  delegate_to: pve_disk_import
+  shell: |
+    qm importdisk {{ replica_vmid }} /var/lib/vz/template/qcow/{{ base_image_name }} {{ vm_config.pve_storage }} --format qcow2
+  register: disk_import_result
+  tags: [create, disk]
+
+- name: "Attach imported disk to VM"
+  delegate_to: pve_disk_import
+  shell: |
+    qm set {{ replica_vmid }} --scsi0 {{ vm_config.pve_storage }}:vm-{{ replica_vmid }}-disk-0,discard=on,iothread=1
+  tags: [create, disk]
+
+- name: "Attach CloudInit drive to VM"
+  delegate_to: pve_disk_import
+  shell: |
+    qm set {{ replica_vmid }} --ide2 {{ vm_config.pve_storage }}:cloudinit
+  tags: [create, disk, cloud-init]
+
+- name: "Regenerate cloud-init configuration"
+  delegate_to: pve_disk_import
+  shell: |
+    qm cloudinit update {{ replica_vmid }}
+  tags: [create, disk, cloud-init]
+
+- name: "Set boot order to use scsi0"
+  delegate_to: pve_disk_import
+  shell: |
+    qm set {{ replica_vmid }} --boot order=scsi0
+  tags: [create, disk]
+
+- name: "Display VM creation result for {{ replica_vm_name }}"
+  pause:
+    echo: false
+    seconds: 1
+    prompt: |
+      ✅ VM '{{ replica_vm_name }}' (VMID {{ replica_vmid }}) created successfully on PVE!
+
+      VMID: {{ replica_vmid }}
+      Node: {{ vm_config.pve_node }}
+      Name: {{ replica_vm_name }}
+      IP: {{ replica_static_ip }}
+      MAC: {{ replica_mac_address }}
+
+      Note: VM disk is still the original size. Will be resized next...
+  tags: [create]
+
+- name: "Resize VM disk for {{ replica_vm_name }}"
+  community.proxmox.proxmox_disk:
+    api_host: "{{ pve_api_host }}"
+    api_user: "{{ pve_api_user }}"
+    api_token_id: "{{ pve_api_token_id }}"
+    api_token_secret: "{{ pve_api_token_secret }}"
+    validate_certs: false
+    vmid: "{{ replica_vmid }}"
+    disk: scsi0
+    size: "{{ vm_config.vm_disk_size | default(default_vm_disk_size) }}"
+    state: resized
+  when: vm_config.vm_disk_size is defined
+  tags: [disk]
+
+- name: "Display disk resize completion for {{ replica_vm_name }}"
+  pause:
+    echo: false
+    seconds: 1
+    prompt: |
+      ✅ Disk resized to {{ vm_config.vm_disk_size | default(default_vm_disk_size) }}
+  when: vm_config.vm_disk_size is defined
+  tags: [disk]
+
+- name: "Start VM {{ replica_vm_name }}"
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ pve_api_host }}"
+    api_user: "{{ pve_api_user }}"
+    api_token_id: "{{ pve_api_token_id }}"
+    api_token_secret: "{{ pve_api_token_secret }}"
+    validate_certs: false
+    node: "{{ vm_config.pve_node }}"
+    vmid: "{{ replica_vmid }}"
+    state: started
+  tags: [start]
+
+- name: "Wait for VM {{ replica_vm_name }} to get IP address"
+  pause:
+    echo: false
+    seconds: 10
+    prompt: |
+      ⏳ Waiting for VM to boot and cloud-init to configure network...
+  tags: [start]
+
+- name: "Display VM information for {{ replica_vm_name }}"
+  pause:
+    echo: false
+    seconds: 1
+    prompt: |
+      ✅ VM '{{ replica_vm_name }}' has been created and started on PVE!
+
+      VMID: {{ replica_vmid }}
+      IP: {{ replica_static_ip }}
+      SSH: ssh {{ vm_ssh_user }}@{{ replica_static_ip }}
+      Password: {{ vm_ssh_password }}
+
+      PVE Console: https://{{ pve_api_host }}:8006/#v1:0:={{ replica_vmid }}:4:5:=:=:=
+  tags: [info]

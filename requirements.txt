@@ -3,3 +3,5 @@ ansible-core>=2.15.0
 ansible-dev-tools>=25.9.0
 libvirt-python>=9.0.0
 lxml>=4.9.0
+proxmoxer>=2.2.0
+requests>=2.32.5

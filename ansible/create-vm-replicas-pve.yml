@@ -1,114 +1,51 @@
 ---
-- name: Process VM replica configuration and create VMs
-  hosts: libvirt_hosts
-  become: true
+- name: Process VM replica configuration and create VMs on Proxmox VE
+  hosts: localhost
   gather_facts: true
+  become: false
+
+  vars_files:
+    - group_vars/all.yml
+    - group_vars/pve.yml
 
   vars:
     vm_config: "{{ hostvars[target_vm] }}"
     replicas: "{{ vm_config.replicas | default(1) }}"
 
   tasks:
-    - name: Ensure libvirtd service is running
-      systemd:
-        name: libvirtd
-        state: started
-        enabled: true
-      tags: setup
+    - name: Validate provisioner is PVE
+      assert:
+        that:
+          - vm_config.provisioner is defined
+          - vm_config.provisioner == 'pve'
+        fail_msg: |
+          ❌ This playbook is for PVE provisioner only!
+          VM {{ target_vm }} has provisioner: {{ vm_config.provisioner | default('not set') }}
 
-    - name: Create base images directory
-      file:
-        path: "{{ base_image_path }}"
-        state: directory
-        mode: '0755'
-      tags: setup
+          For libvirt VMs, use: make ansible-create target_vm={{ target_vm }}
 
-    - name: Create secrets directory
-      file:
-        path: "../secrets"
-        state: directory
-        mode: '0755'
-      delegate_to: localhost
-      become: false
-      tags: setup
+    - name: Validate PVE-specific configuration
+      assert:
+        that:
+          - vm_config.pve_node is defined
+          - vm_config.pve_storage is defined
+          - vm_config.pve_vmid_start is defined
+          - vm_config.pve_vmid_start | int >= 100
+          - vm_config.pve_vmid_start | int <= 999999
+        fail_msg: |
+          ❌ Missing required PVE configuration for {{ target_vm }}:
+          - provisioner: {{ vm_config.provisioner | default('NOT SET') }}
+          - pve_node: {{ vm_config.pve_node | default('NOT SET') }}
+          - pve_storage: {{ vm_config.pve_storage | default('NOT SET') }}
+          - pve_vmid_start: {{ vm_config.pve_vmid_start | default('NOT SET') }}
 
-    - name: Check if SSH key already exists
-      stat:
-        path: "{{ vm_ssh_key_path }}"
-      delegate_to: localhost
-      become: false
-      register: ssh_key_stat
-      tags: setup
+          Example configuration:
+          {{ target_vm }}:
+            provisioner: pve
+            pve_node: "pve"
+            pve_storage: "local-lvm"
+            pve_vmid_start: 200
 
-    - name: Generate ed25519 SSH key for VMs
-      command: >
-        ssh-keygen -t ed25519
-        -f {{ vm_ssh_key_path }}
-        -N ""
-        -C "libvirt-vms-key"
-      delegate_to: localhost
-      become: false
-      when: not ssh_key_stat.stat.exists
-      tags: setup
-
-    - name: Setup host bridge network if vm_bridge is defined
-      block:
-        - name: Check if bridge interface is configured
-          command: ip link show {{ vm_config.vm_bridge }}
-          register: bridge_check
-          ignore_errors: true
-          changed_when: false
-
-        - name: Get host physical interface for bridge
-          set_fact:
-            host_physical_interface: "{{ vm_config.vm_bridge_interface }}"
-          when: vm_config.vm_bridge_interface is defined
-
-        - name: Create netplan bridge configuration
-          copy:
-            dest: /etc/netplan/01-{{ vm_config.vm_bridge }}.yaml
-            mode: '0600'
-            content: |
-              network:
-                version: 2
-                renderer: networkd
-                ethernets:
-                  {{ host_physical_interface }}:
-                    dhcp4: no
-                bridges:
-                  {{ vm_config.vm_bridge }}:
-                    interfaces: [{{ host_physical_interface }}]
-              {% if vm_config.host_bridge_ip is defined %}
-                    addresses: [{{ vm_config.host_bridge_ip }}/24]
-                    dhcp4: true
-                    dhcp4-overrides:
-                      use-dns: true
-                      use-routes: true
-              {% else %}
-                    dhcp4: yes
-              {% endif %}
-          when:
-            - bridge_check.rc != 0
-            - host_physical_interface is defined
-
-        - name: Apply netplan configuration
-          command: netplan apply
-          when:
-            - bridge_check.rc != 0
-            - host_physical_interface is defined
-
-        - name: Wait for bridge to be available
-          command: ip link show {{ vm_config.vm_bridge }}
-          register: bridge_ready
-          until: bridge_ready.rc == 0
-          retries: 10
-          delay: 2
-          changed_when: false
-          when:
-            - bridge_check.rc != 0
-            - host_physical_interface is defined
-      when: vm_config.vm_bridge is defined
-      tags: [bridge, network]
     - name: Validate replica configuration
       assert:
         that:
@@ -131,20 +68,43 @@
         echo: false
         seconds: 1
         prompt: |
-          📋 VM Replica Creation Plan:
+          📋 PVE VM Replica Creation Plan:
           Base VM: {{ target_vm }}
+          PVE Node: {{ vm_config.pve_node }}
+          Storage: {{ vm_config.pve_storage }}
           Replicas: {{ replicas }}
           {% if replicas | int > 1 %}
           Will create VMs:
           {% for i in range(replicas | int) %}
-          - {{ vm_config.vm_name }}-{{ i }} (IP: {{ vm_config.vm_static_ips[i] }}, MAC: {{ vm_config.vm_mac_addresses[i] }})
+          - VMID {{ vm_config.pve_vmid_start | int + i }}: {{ vm_config.vm_name }}-{{ i }} (IP: {{ vm_config.vm_static_ips[i] }}, MAC: {{ vm_config.vm_mac_addresses[i] }})
           {% endfor %}
           {% else %}
-          Will create single VM: {{ vm_config.vm_name }}
+          Will create single VM:
+          - VMID {{ vm_config.pve_vmid_start }}: {{ vm_config.vm_name }} (IP: {{ vm_config.vm_static_ip }}, MAC: {{ vm_config.vm_mac_address }})
           {% endif %}
 
-    - name: Create replica VMs
-      include_tasks: create-single-vm.yml
+    - name: Verify PVE connectivity
+      uri:
+        url: "https://{{ pve_api_host }}:8006/api2/json/version"
+        method: GET
+        headers:
+          Authorization: "PVEAPIToken={{ pve_api_user }}!{{ pve_api_token_id }}={{ pve_api_token_secret }}"
+        validate_certs: false
+      register: pve_version
+      tags: [verify]
+
+    - name: Display PVE connection status
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ✅ Connected to Proxmox VE
+          Version: {{ pve_version.json.data.version }}
+          Node: {{ vm_config.pve_node }}
+      tags: [verify]
+
+    - name: Create replica VMs on PVE
+      include_tasks: create-single-vm-pve.yml
       loop: "{{ range(replicas | int) | list }}"
       loop_control:
         loop_var: replica_index
@@ -153,40 +113,37 @@
         replica_hostname: "{{ vm_config.vm_hostname | default(vm_config.vm_name) }}{% if replicas | int > 1 %}-{{ replica_index }}{% endif %}"
         replica_mac_address: "{% if replicas | int > 1 %}{{ vm_config.vm_mac_addresses[replica_index] }}{% else %}{{ vm_config.vm_mac_address }}{% endif %}"
         replica_static_ip: "{% if replicas | int > 1 %}{{ vm_config.vm_static_ips[replica_index] }}{% else %}{{ vm_config.vm_static_ip }}{% endif %}"
+        replica_vmid: "{{ vm_config.pve_vmid_start | int + replica_index }}"
 
     - name: Display completion summary
       pause:
         echo: false
         seconds: 1
         prompt: |
-          ✅ All VM replicas created successfully!
+          ✅ All PVE VM replicas created successfully!
 
           {% if replicas | int > 1 %}
           Created VMs:
           {% for i in range(replicas | int) %}
-          - {{ vm_config.vm_name }}-{{ i }}: ssh vagrant@{{ vm_config.vm_static_ips[i] }}
+          - VMID {{ vm_config.pve_vmid_start | int + i }}: {{ vm_config.vm_name }}-{{ i }} - ssh vagrant@{{ vm_config.vm_static_ips[i] }}
           {% endfor %}
-
-          Quick access:
-          make ssh VM={{ target_vm }}@0  # SSH to first replica
-          make ssh VM={{ target_vm }}@1  # SSH to second replica
           {% else %}
-          Created VM: {{ vm_config.vm_name }}
-          SSH: ssh vagrant@{{ vm_config.vm_static_ip }}
+          Created VM:
+          - VMID {{ vm_config.pve_vmid_start }}: {{ vm_config.vm_name }} - ssh vagrant@{{ vm_config.vm_static_ip }}
           {% endif %}
 
-    # Post-deployment setup (NVIDIA, Docker, etc.)
+          PVE Web UI: https://{{ pve_api_host }}:8006/
+
+    # Post-deployment setup (NVIDIA, Docker, etc.) - reuses existing playbook logic
     - name: Prepare VMs for post-deployment tasks
       block:
         - name: Wait for VMs to be accessible via SSH
           wait_for:
             host: "{% if replicas | int > 1 %}{{ vm_config.vm_static_ips[item] }}{% else %}{{ vm_config.vm_static_ip }}{% endif %}"
             port: 22
-            delay: 10
+            delay: 15
             timeout: 300
             state: started
-          delegate_to: localhost
-          become: false
           loop: "{{ range(replicas | int) | list }}"
           when: vm_config.install_nvidia | default(false) | bool or vm_config.install_docker | default(false) | bool or (vm_config.custom_packages | default([]) | length > 0) or (vm_config.post_install_script | default('') | length > 0)
 
@@ -217,6 +174,9 @@
           This will take several minutes and requires a reboot.
       when: vm_config.install_nvidia | default(false) | bool
       tags: [nvidia, post-deploy]
+
+# Post-deployment plays are identical to libvirt version
+# They operate on the 'replica_vms' group added dynamically above
 
 - name: Wait for VMs to be ready for post-deployment
   hosts: replica_vms

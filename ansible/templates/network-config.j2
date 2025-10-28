@@ -1,15 +1,23 @@
 {% set config = replica_config | default(vm_config) %}
 {% if config.vm_static_ip is defined %}
-# Network configuration for static IP with DHCP for routes/DNS
+# Network configuration for static IP with explicit gateway and DNS
 version: 2
 ethernets:
   enp1s0:
     addresses:
       - {{ config.vm_static_ip }}/24
-    dhcp4: true
-    dhcp4-overrides:
-      use-dns: true
-      use-routes: true
+{% if vm_config.vm_gateway is defined %}
+    routes:
+      - to: default
+        via: {{ vm_config.vm_gateway }}
+{% endif %}
+{% if vm_config.vm_nameservers is defined and vm_config.vm_nameservers | length > 0 %}
+    nameservers:
+      addresses:
+{% for ns in vm_config.vm_nameservers %}
+        - {{ ns }}
+{% endfor %}
+{% endif %}
 {% else %}
 # Network configuration for DHCP
 version: 2

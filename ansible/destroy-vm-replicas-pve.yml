@@ -1,0 +1,82 @@
+---
+- name: Destroy VM replicas on Proxmox VE
+  hosts: localhost
+  gather_facts: false
+  become: false
+
+  vars_files:
+    - group_vars/all.yml
+    - group_vars/pve.yml
+
+  vars:
+    vm_config: "{{ hostvars[target_vm] }}"
+    replicas: "{{ vm_config.replicas | default(1) }}"
+
+  tasks:
+    - name: Validate provisioner is PVE
+      assert:
+        that:
+          - vm_config.provisioner is defined
+          - vm_config.provisioner == 'pve'
+        fail_msg: |
+          ❌ This playbook is for PVE provisioner only!
+          VM {{ target_vm }} has provisioner: {{ vm_config.provisioner | default('not set') }}
+
+          For libvirt VMs, use: make destroy VM={{ target_vm }}
+
+    - name: Display destruction plan
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ⚠️  PVE VM Destruction Plan:
+          Base VM: {{ target_vm }}
+          PVE Node: {{ vm_config.pve_node }}
+          Replicas: {{ replicas }}
+          {% if replicas | int > 1 %}
+          Will destroy VMs:
+          {% for i in range(replicas | int) %}
+          - VMID {{ vm_config.pve_vmid_start | int + i }}: {{ vm_config.vm_name }}-{{ i }} (IP: {{ vm_config.vm_static_ips[i] }})
+          {% endfor %}
+          {% else %}
+          Will destroy single VM:
+          - VMID {{ vm_config.pve_vmid_start }}: {{ vm_config.vm_name }} (IP: {{ vm_config.vm_static_ip }})
+          {% endif %}
+
+          This action is IRREVERSIBLE!
+
+    - name: Verify PVE connectivity
+      uri:
+        url: "https://{{ pve_api_host }}:8006/api2/json/version"
+        method: GET
+        headers:
+          Authorization: "PVEAPIToken={{ pve_api_user }}!{{ pve_api_token_id }}={{ pve_api_token_secret }}"
+        validate_certs: false
+      register: pve_version
+      tags: [verify]
+
+    - name: Destroy replica VMs on PVE
+      include_tasks: destroy-single-vm-pve.yml
+      loop: "{{ range(replicas | int) | list }}"
+      loop_control:
+        loop_var: replica_index
+      vars:
+        replica_vm_name: "{{ vm_config.vm_name }}{% if replicas | int > 1 %}-{{ replica_index }}{% endif %}"
+        replica_vmid: "{{ vm_config.pve_vmid_start | int + replica_index }}"
+
+    - name: Display completion summary
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ✅ All PVE VM replicas destroyed successfully!
+
+          {% if replicas | int > 1 %}
+          Destroyed VMs:
+          {% for i in range(replicas | int) %}
+          - VMID {{ vm_config.pve_vmid_start | int + i }}: {{ vm_config.vm_name }}-{{ i }}
+          {% endfor %}
+          {% else %}
+          Destroyed VM:
+          - VMID {{ vm_config.pve_vmid_start }}: {{ vm_config.vm_name }}
+          {% endif %}
