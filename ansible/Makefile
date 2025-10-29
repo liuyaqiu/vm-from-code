@@ -2,7 +2,10 @@
 # Supports both libvirt (local) and Proxmox VE (remote) provisioners
 
 .PHONY: help install setup list create start stop restart destroy gpu-setup build-image ssh ssh-pass
-.PHONY: setup-pve create-pve destroy-pve
+.PHONY: setup-pve create-pve destroy-pve load-secrets cleanup-secrets
+
+# Vault password file for PVE encrypted credentials
+PVE_VAULT_PASS_FILE = $(HOME)/.ansible/pve-vault-pass
 
 # Default target
 help:
@@ -33,6 +36,10 @@ help:
 	@echo "  ssh [VM=name[@idx]]  - SSH into VM using SSH key (e.g., make ssh VM=ubuntu-dev@0)"
 	@echo "  ssh-pass [VM=name[@idx]] - SSH into VM using password (e.g., make ssh-pass VM=ubuntu-dev@1)"
 	@echo ""
+	@echo "  === Secret Management ==="
+	@echo "  load-secrets   - Decrypt encrypted secrets (*.encrypted -> plain files)"
+	@echo "  cleanup-secrets- Remove decrypted secrets (keep only *.encrypted files)"
+	@echo ""
 	@echo "  === Examples ==="
 	@echo "  Libvirt:  make create VM=k8s-master      # Creates libvirt VMs"
 	@echo "  PVE:      make create VM=k8s-master-pve  # Creates PVE VMs"
@@ -62,7 +69,12 @@ setup-pve:
 		echo "Error: Base image not found. Please run 'make build-image' first."; \
 		exit 1; \
 	fi
-	ansible-playbook -i inventory.yml setup-pve.yml --ask-vault-pass
+	@if [ ! -f "$(PVE_VAULT_PASS_FILE)" ]; then \
+		echo "Error: Vault password file not found at $(PVE_VAULT_PASS_FILE)"; \
+		echo "Please create it or use --ask-vault-pass manually"; \
+		exit 1; \
+	fi
+	ansible-playbook -i inventory.yml setup-pve.yml --vault-password-file $(PVE_VAULT_PASS_FILE)
 
 # Build clean base image with Packer (NEW WORKFLOW)
 build-image:
@@ -73,12 +85,31 @@ build-image:
 	@echo "Image location: ../builds/ubuntu-24.04-server.qcow2"
 	@echo "Cloud-init state has been reset - ready for deployment-specific configuration"
 
+# Load encrypted secrets (decrypt *.encrypted files)
+load-secrets:
+	@echo "Loading encrypted secrets..."
+	@if [ ! -f "$(PVE_VAULT_PASS_FILE)" ]; then \
+		echo "Warning: Vault password file not found at $(PVE_VAULT_PASS_FILE)"; \
+		echo "Secrets requiring vault password will not be decrypted"; \
+	else \
+		ansible-playbook load-secrets.yml --vault-password-file $(PVE_VAULT_PASS_FILE); \
+	fi
+
+# Cleanup decrypted secrets (remove plain files, keep *.encrypted)
+cleanup-secrets:
+	@echo "Cleaning up decrypted secrets..."
+	@if [ ! -f "$(PVE_VAULT_PASS_FILE)" ]; then \
+		echo "Warning: Vault password file not found at $(PVE_VAULT_PASS_FILE)"; \
+	else \
+		ansible-playbook load-secrets.yml -e cleanup=true --vault-password-file $(PVE_VAULT_PASS_FILE); \
+	fi
+
 # List all VMs
 list:
 	ansible-playbook -i inventory.yml list-vms.yml --ask-become-pass
 
 # Create VM (with replica support) - Auto-detects provisioner
-create:
+create: load-secrets
 	@if [ -z "$(VM)" ]; then \
 		echo "Error: Please specify VM name. Usage: make create VM=ubuntu-dev"; \
 		exit 1; \
@@ -89,7 +120,12 @@ create:
 	if [ "$$PROVISIONER" = "pve" ]; then \
 		echo "Creating PVE VM(s) for $(VM)..."; \
 		echo "This will create all replicas if configured in inventory.yml"; \
-		ansible-playbook -i inventory.yml create-vm-replicas-pve.yml -e target_vm=$(VM) --ask-vault-pass; \
+		if [ ! -f "$(PVE_VAULT_PASS_FILE)" ]; then \
+			echo "Error: Vault password file not found at $(PVE_VAULT_PASS_FILE)"; \
+			echo "Please create it or use --ask-vault-pass manually"; \
+			exit 1; \
+		fi; \
+		ansible-playbook -i inventory.yml create-vm-replicas-pve.yml -e target_vm=$(VM) --vault-password-file $(PVE_VAULT_PASS_FILE); \
 	else \
 		echo "Creating libvirt VM(s) for $(VM)..."; \
 		echo "This will create all replicas if configured in inventory.yml"; \
@@ -121,7 +157,7 @@ restart:
 	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=restart --ask-become-pass
 
 # Destroy VM (with replica support) - Auto-detects provisioner
-destroy:
+destroy: load-secrets
 	@if [ -z "$(VM)" ]; then \
 		echo "Error: Please specify VM name. Usage: make destroy VM=ubuntu-dev"; \
 		exit 1; \
@@ -133,7 +169,12 @@ destroy:
 	echo "Provisioner: $$PROVISIONER"; \
 	if [ "$$PROVISIONER" = "pve" ]; then \
 		echo "Destroying PVE VM(s) for $(VM)..."; \
-		ansible-playbook -i inventory.yml destroy-vm-replicas-pve.yml -e target_vm=$(VM) --ask-vault-pass; \
+		if [ ! -f "$(PVE_VAULT_PASS_FILE)" ]; then \
+			echo "Error: Vault password file not found at $(PVE_VAULT_PASS_FILE)"; \
+			echo "Please create it or use --ask-vault-pass manually"; \
+			exit 1; \
+		fi; \
+		ansible-playbook -i inventory.yml destroy-vm-replicas-pve.yml -e target_vm=$(VM) --vault-password-file $(PVE_VAULT_PASS_FILE); \
 	else \
 		echo "Destroying libvirt VM(s) for $(VM)..."; \
 		ansible-playbook -i inventory.yml destroy-vm-replicas.yml -e target_vm=$(VM) --ask-become-pass; \
