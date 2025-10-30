@@ -42,6 +42,7 @@ bash: docker-build
 	@echo "Inventory: $(INVENTORY_PATH)"
 	@echo "SSH Key: $(SSH_PRIVATE_KEY_PATH)"
 	@echo "Using custom image: $(CUSTOM_IMAGE_NAME):$(CUSTOM_IMAGE_TAG)"
+	@echo "Cluster init: 'ansible-playbook -i /inventory/inventory.ini --user vagrant --private-key /root/.ssh/id_rsa --become cluster.yml'"
 	docker run --rm -it \
 		--mount type=bind,source=$(INVENTORY_PATH),dst=/inventory \
 		--mount type=bind,source=$(SSH_PRIVATE_KEY_PATH),dst=/root/.ssh/id_rsa \
