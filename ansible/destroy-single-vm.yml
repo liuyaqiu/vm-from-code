@@ -6,7 +6,7 @@
   community.libvirt.virt:
     command: status
     name: "{{ replica_vm_name }}"
-    uri: "{{ libvirt_uri | default('qemu:///system') }}"
+    uri: "{{ libvirt_uri | default('qemu:///session') }}"
   register: vm_status
   ignore_errors: true
   tags: check
@@ -17,7 +17,7 @@
       community.libvirt.virt:
         name: "{{ replica_vm_name }}"
         state: shutdown
-        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+        uri: "{{ libvirt_uri | default('qemu:///session') }}"
       when: vm_status is succeeded and vm_status.status == 'running'
       ignore_errors: true
       tags: stop
@@ -34,7 +34,7 @@
       community.libvirt.virt:
         name: "{{ replica_vm_name }}"
         state: destroyed
-        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+        uri: "{{ libvirt_uri | default('qemu:///session') }}"
       when: vm_status is succeeded
       ignore_errors: true
       tags: destroy
@@ -43,7 +43,7 @@
       community.libvirt.virt:
         command: undefine
         name: "{{ replica_vm_name }}"
-        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+        uri: "{{ libvirt_uri | default('qemu:///session') }}"
       when: vm_status is succeeded
       ignore_errors: true
       tags: undefine

@@ -1,7 +1,7 @@
 # Ansible Multi-Provider VM Management Makefile
 # Supports both libvirt (local) and Proxmox VE (remote) provisioners
 
-.PHONY: help install setup list create start stop restart destroy gpu-setup build-image ssh ssh-pass
+.PHONY: help install setup cleanup list list-pve create start stop restart destroy gpu-setup build-image ssh ssh-pass
 .PHONY: setup-pve create-pve destroy-pve load-secrets cleanup-secrets
 
 # Vault password file for PVE encrypted credentials
@@ -14,13 +14,15 @@ help:
 	@echo "  === Setup ==="
 	@echo "  install        - Install Ansible and required collections"
 	@echo "  setup          - Setup libvirt environment (local)"
+	@echo "  cleanup        - Cleanup bridge network and QEMU config (checks VM dependencies)"
 	@echo "  setup-pve      - Setup PVE: configure SSH keys + upload base image (prompts for password on first run)"
 	@echo ""
 	@echo "  === Image Building ==="
 	@echo "  build-image    - Build Ubuntu cloud image with Packer (fast!)"
 	@echo ""
 	@echo "  === VM Management (Auto-detects provisioner) ==="
-	@echo "  list           - List all VMs and their status"
+	@echo "  list           - List all libvirt VMs and their status"
+	@echo "  list-pve       - List all Proxmox VE VMs and their status"
 	@echo "  create VM=name - Create and start VM(s) (supports replicas, auto-detects provisioner)"
 	@echo "  destroy VM=name- Destroy VM(s) completely (destroys all replicas, auto-detects provisioner)"
 	@echo ""
@@ -29,7 +31,6 @@ help:
 	@echo "  stop VM=name   - Stop VM gracefully"
 	@echo "  restart VM=name- Restart VM"
 	@echo "  destroy-all VM=name - Destroy VM(s) and clean up base image (destroys all replicas + base)"
-	@echo "  delete-bridge VM=name - Delete bridge network and restore physical interface"
 	@echo "  gpu-setup      - Setup GPU passthrough (see GPU-PASSTHROUGH-AMD.md)"
 	@echo ""
 	@echo "  === SSH Access (Works for both provisioners) ==="
@@ -61,6 +62,13 @@ install:
 # Setup libvirt environment
 setup:
 	ansible-playbook -i inventory.yml setup.yml --ask-become-pass
+
+# Cleanup bridge network and QEMU configuration
+cleanup:
+	@echo "WARNING: This will remove bridge network and QEMU bridge configuration!"
+	@echo "All VMs using the bridge must be destroyed first."
+	@read -p "Are you sure? (y/N) " confirm && [ "$$confirm" = "y" ]
+	ansible-playbook -i inventory.yml setup.yml --tags cleanup --ask-become-pass
 
 # Setup Proxmox VE environment and upload base image
 setup-pve:
@@ -104,9 +112,18 @@ cleanup-secrets:
 		ansible-playbook load-secrets.yml -e cleanup=true --vault-password-file $(PVE_VAULT_PASS_FILE); \
 	fi
 
-# List all VMs
+# List all libvirt VMs
 list:
-	ansible-playbook -i inventory.yml list-vms.yml --ask-become-pass
+	ansible-playbook -i inventory.yml list-vms.yml
+
+# List all PVE VMs
+list-pve: load-secrets
+	@if [ ! -f "$(PVE_VAULT_PASS_FILE)" ]; then \
+		echo "Error: Vault password file not found at $(PVE_VAULT_PASS_FILE)"; \
+		echo "Please create it or use --ask-vault-pass manually"; \
+		exit 1; \
+	fi
+	ansible-playbook -i inventory.yml list-vms-pve.yml --vault-password-file $(PVE_VAULT_PASS_FILE)
 
 # Create VM (with replica support) - Auto-detects provisioner
 create: load-secrets
@@ -129,7 +146,7 @@ create: load-secrets
 	else \
 		echo "Creating libvirt VM(s) for $(VM)..."; \
 		echo "This will create all replicas if configured in inventory.yml"; \
-		ansible-playbook -i inventory.yml create-vm-replicas.yml -e target_vm=$(VM) --ask-become-pass; \
+		ansible-playbook -i inventory.yml create-vm-replicas.yml -e target_vm=$(VM); \
 	fi
 
 # Start VM
@@ -138,7 +155,7 @@ start:
 		echo "Error: Please specify VM name. Usage: make start VM=ubuntu-dev"; \
 		exit 1; \
 	fi
-	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=start --ask-become-pass
+	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=start
 
 # Stop VM
 stop:
@@ -146,7 +163,7 @@ stop:
 		echo "Error: Please specify VM name. Usage: make stop VM=ubuntu-dev"; \
 		exit 1; \
 	fi
-	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=stop --ask-become-pass
+	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=stop
 
 # Restart VM
 restart:
@@ -154,7 +171,7 @@ restart:
 		echo "Error: Please specify VM name. Usage: make restart VM=ubuntu-dev"; \
 		exit 1; \
 	fi
-	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=restart --ask-become-pass
+	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=restart
 
 # Destroy VM (with replica support) - Auto-detects provisioner
 destroy: load-secrets
@@ -177,7 +194,7 @@ destroy: load-secrets
 		ansible-playbook -i inventory.yml destroy-vm-replicas-pve.yml -e target_vm=$(VM) --vault-password-file $(PVE_VAULT_PASS_FILE); \
 	else \
 		echo "Destroying libvirt VM(s) for $(VM)..."; \
-		ansible-playbook -i inventory.yml destroy-vm-replicas.yml -e target_vm=$(VM) --ask-become-pass; \
+		ansible-playbook -i inventory.yml destroy-vm-replicas.yml -e target_vm=$(VM); \
 	fi
 
 # Destroy VM and clean up base image (with replica support)
@@ -201,17 +218,7 @@ force-stop:
 		echo "Error: Please specify VM name. Usage: make force-stop VM=ubuntu-dev"; \
 		exit 1; \
 	fi
-	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=force-stop --ask-become-pass
-
-# Delete bridge network
-delete-bridge:
-	@if [ -z "$(VM)" ]; then \
-		echo "Error: Please specify VM name. Usage: make delete-bridge VM=ubuntu-dev"; \
-		exit 1; \
-	fi
-	@echo "WARNING: This will delete the bridge network and restore the physical interface!"
-	@read -p "Are you sure? (y/N) " confirm && [ "$$confirm" = "y" ]
-	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=delete-bridge --ask-become-pass
+	ansible-playbook -i inventory.yml manage-vm.yml -e target_vm=$(VM) -e action=force-stop
 
 # SSH into VM using SSH key (default: ubuntu-dev)
 # Supports replica syntax: make ssh VM=ubuntu-dev@0

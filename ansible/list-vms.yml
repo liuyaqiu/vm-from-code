@@ -1,14 +1,14 @@
 ---
 - name: List and get information about libvirt VMs
   hosts: libvirt_hosts
-  become: true
+  become: false
   gather_facts: false
   
   tasks:
     - name: Get list of all VMs
       community.libvirt.virt:
         command: list_vms
-        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+        uri: "{{ libvirt_uri | default('qemu:///session') }}"
       register: all_vms
       tags: list
 
@@ -16,7 +16,7 @@
       community.libvirt.virt:
         command: list_vms
         state: running
-        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+        uri: "{{ libvirt_uri | default('qemu:///session') }}"
       register: running_vms
       tags: list
 
@@ -24,7 +24,7 @@
       community.libvirt.virt:
         command: info
         name: "{{ item }}"
-        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+        uri: "{{ libvirt_uri | default('qemu:///session') }}"
       register: vm_details
       loop: "{{ all_vms.list_vms }}"
       when: all_vms.list_vms | length > 0
@@ -35,36 +35,48 @@
         echo: false
         seconds: 1
         prompt: |
+
+          ═══════════════════════════════════════════════════════════════════════
+          Libvirt VM Summary
+          ═══════════════════════════════════════════════════════════════════════
+
           Total VMs: {{ all_vms.list_vms | length }}
           Running VMs: {{ running_vms.list_vms | length }}
 
           VM Details:
           {% for vm_item_result in vm_details.results -%}
           {% set vm_data = vm_item_result[vm_item_result.item] -%}
-          - Name: {{ vm_item_result.item }}
-            State: {{ vm_data.state | default('N/A') }}
-            Memory: {{ (vm_data.memory | int / 1024 / 1024) | round(2) | default('N/A') }} GB
-            VCPUs: {{ vm_data.nrVirtCpu | default('N/A') }}
-            Autostart: {{ vm_data.autostart | default('N/A') }}
-            CPU Time: {{ (vm_data.cpuTime | int / 1000000000) | round(2) | default('N/A') }} seconds
+          ───────────────────────────────────────────────────────────────────────
+          Name:       {{ vm_item_result.item }}
+          State:      {{ vm_data.state | default('N/A') | upper }}
+          Memory:     {{ (vm_data.memory | int / 1024 / 1024) | round(2) | default('N/A') }} GB
+          VCPUs:      {{ vm_data.nrVirtCpu | default('N/A') }}
+          Autostart:  {{ vm_data.autostart | default('N/A') }}
+          CPU Time:   {{ (vm_data.cpuTime | int / 1000000000) | round(2) | default('N/A') }} seconds
 
           {% endfor %}
+          ═══════════════════════════════════════════════════════════════════════
+
       when: all_vms.list_vms | length > 0
       tags: summary
+      become: false
 
     - name: Display message when no VMs exist
       pause:
         echo: false
         seconds: 1
         prompt: |
+
           No VMs found in libvirt.
+
       when: all_vms.list_vms | length == 0
       tags: summary
+      become: false
 
     - name: Get network information
       community.libvirt.virt_net:
         command: list_nets
-        uri: "{{ libvirt_uri | default('qemu:///system') }}"
+        uri: "{{ libvirt_uri | default('qemu:///session') }}"
       register: networks
       tags: network
 
@@ -73,8 +85,14 @@
         echo: false
         seconds: 1
         prompt: |
-          Available networks:
+
+          ═══════════════════════════════════════════════════════════════════════
+          Libvirt Networks
+          ═══════════════════════════════════════════════════════════════════════
           {% for net in networks.list_nets %}
           - {{ net }}
           {% endfor %}
+          ═══════════════════════════════════════════════════════════════════════
+
       tags: network
+      become: false

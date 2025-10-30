@@ -67,9 +67,9 @@
     </controller>
     
     <!-- Network Interface -->
-{% if vm_config.vm_bridge is defined %}
+{% if libvirt_bridge is defined %}
     <interface type='bridge'>
-      <source bridge='{{ vm_config.vm_bridge }}'/>
+      <source bridge='{{ libvirt_bridge }}'/>
       <model type='virtio'/>
 {% if config.vm_mac_address is defined %}
       <mac address='{{ config.vm_mac_address }}'/>

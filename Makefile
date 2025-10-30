@@ -28,10 +28,11 @@ help:
 	@echo "  packer-test    - Test built image"
 	@echo ""
 	@echo "=== ANSIBLE TARGETS (Runtime Environment) ==="
-	@echo "  ansible-setup  - Install runtime dependencies (QEMU/KVM)"
-	@echo "  ansible-list   - List available VMs"
-	@echo "  ansible-create - Create VMs (specify VM with target_vm=name)"
-	@echo "  ansible-destroy- Destroy VMs (specify VM with target_vm=name)"
+	@echo "  ansible-setup    - Install runtime dependencies (QEMU/KVM)"
+	@echo "  ansible-list     - List available libvirt VMs"
+	@echo "  ansible-list-pve - List available Proxmox VE VMs"
+	@echo "  ansible-create   - Create VMs (specify VM with target_vm=name)"
+	@echo "  ansible-destroy  - Destroy VMs (specify VM with target_vm=name)"
 	@echo ""
 	@echo "For detailed help on specific tools:"
 	@echo "  make packer-help"
@@ -99,6 +100,9 @@ ansible-setup:
 
 ansible-list:
 	@cd ansible && make list
+
+ansible-list-pve:
+	@cd ansible && make list-pve
 
 ansible-create:
 	@cd ansible && make create target_vm=$(target_vm)

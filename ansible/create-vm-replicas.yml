@@ -1,7 +1,7 @@
 ---
 - name: Process VM replica configuration and create VMs
   hosts: libvirt_hosts
-  become: true
+  become: false
   gather_facts: true
 
   vars:
@@ -9,18 +9,19 @@
     replicas: "{{ vm_config.replicas | default(1) }}"
 
   tasks:
-    - name: Ensure libvirtd service is running
-      systemd:
-        name: libvirtd
-        state: started
-        enabled: true
-      tags: setup
+#    - name: Ensure libvirtd (user) service is running
+#      systemd:
+#        name: libvirtd
+#        state: started
+#        enabled: true
+#      tags: setup
 
     - name: Create base images directory
       file:
         path: "{{ base_image_path }}"
         state: directory
         mode: '0755'
+      become: false
       tags: setup
 
     - name: Create secrets directory
@@ -51,64 +52,6 @@
       when: not ssh_key_stat.stat.exists
       tags: setup
 
-    - name: Setup host bridge network if vm_bridge is defined
-      block:
-        - name: Check if bridge interface is configured
-          command: ip link show {{ vm_config.vm_bridge }}
-          register: bridge_check
-          ignore_errors: true
-          changed_when: false
-
-        - name: Get host physical interface for bridge
-          set_fact:
-            host_physical_interface: "{{ vm_config.vm_bridge_interface }}"
-          when: vm_config.vm_bridge_interface is defined
-
-        - name: Create netplan bridge configuration
-          copy:
-            dest: /etc/netplan/01-{{ vm_config.vm_bridge }}.yaml
-            mode: '0600'
-            content: |
-              network:
-                version: 2
-                renderer: networkd
-                ethernets:
-                  {{ host_physical_interface }}:
-                    dhcp4: no
-                bridges:
-                  {{ vm_config.vm_bridge }}:
-                    interfaces: [{{ host_physical_interface }}]
-              {% if vm_config.host_bridge_ip is defined %}
-                    addresses: [{{ vm_config.host_bridge_ip }}/24]
-                    dhcp4: true
-                    dhcp4-overrides:
-                      use-dns: true
-                      use-routes: true
-              {% else %}
-                    dhcp4: yes
-              {% endif %}
-          when:
-            - bridge_check.rc != 0
-            - host_physical_interface is defined
-
-        - name: Apply netplan configuration
-          command: netplan apply
-          when:
-            - bridge_check.rc != 0
-            - host_physical_interface is defined
-
-        - name: Wait for bridge to be available
-          command: ip link show {{ vm_config.vm_bridge }}
-          register: bridge_ready
-          until: bridge_ready.rc == 0
-          retries: 10
-          delay: 2
-          changed_when: false
-          when:
-            - bridge_check.rc != 0
-            - host_physical_interface is defined
-      when: vm_config.vm_bridge is defined
-      tags: [bridge, network]
     - name: Validate replica configuration
       assert:
         that:

@@ -49,7 +49,6 @@
   set_fact:
     pve_ipconfig: "ip={{ replica_static_ip }}/24,gw={{ vm_config.vm_gateway | default('192.168.88.1') }}"
     pve_nameserver: "{{ vm_config.vm_nameservers | default(['8.8.8.8', '8.8.4.4']) | join(' ') }}"
-    pve_bridge: "{{ vm_config.vm_bridge | default('vmbr0') }}"
   tags: [cloud-init]
 
 - name: "Read SSH public key for {{ replica_vm_name }}"
@@ -117,6 +116,12 @@
   shell: |
     qm importdisk {{ replica_vmid }} /var/lib/vz/template/qcow/{{ base_image_name }} {{ vm_config.pve_storage }} --format qcow2
   register: disk_import_result
+  tags: [create, disk]
+
+- name: "Add EFI disk for UEFI boot"
+  delegate_to: pve_disk_import
+  shell: |
+    qm set {{ replica_vmid }} --efidisk0 {{ vm_config.pve_storage }}:1,efitype=4m,pre-enrolled-keys=0
   tags: [create, disk]
 
 - name: "Attach imported disk to VM"

@@ -5,7 +5,7 @@ all:
       hosts:
         localhost:
           ansible_connection: local
-          libvirt_uri: "qemu:///system"
+          libvirt_uri: "qemu:///session"
     
     vms:
       hosts:
@@ -19,10 +19,6 @@ all:
           vm_os_variant: "ubuntu24.04"
           vm_autostart: true
           gpu_passthrough: false
-          # Bridge network configuration (connects to physical network)
-          vm_bridge: "br0"
-          vm_bridge_interface: "enp10s0"
-          host_bridge_ip: "192.168.88.9"  # Static IP for host's bridge interface
           # Replica configuration - create multiple VMs with same config
           replicas: 3  # Number of VM instances to create
           vm_mac_addresses:
@@ -57,10 +53,6 @@ all:
           vm_os_variant: "ubuntu24.04"
           vm_autostart: true
           gpu_passthrough: false
-          # Bridge network configuration (connects to physical network)
-          vm_bridge: "br0"
-          vm_bridge_interface: "enp10s0"
-          host_bridge_ip: "192.168.88.9"  # Static IP for host's bridge interface
           # Replica configuration - create multiple VMs with same config
           replicas: 3  # Number of VM instances to create
           vm_mac_addresses:
@@ -95,11 +87,6 @@ all:
           vm_os_variant: "ubuntu24.04"
           vm_autostart: true
           gpu_passthrough: false
-          # Bridge network configuration (connects to physical network)
-          vm_bridge: "br0"
-          vm_bridge_interface: "enp10s0"
-          host_bridge_ip: "192.168.88.9"  # Static IP for host's bridge interface
-          # Replica configuration - create multiple VMs with same config
           replicas: 3  # Number of VM instances to create
           vm_mac_addresses:
             - "52:54:00:12:34:16"
@@ -137,10 +124,6 @@ all:
           vm_memory: 8192
           vm_vcpus: 4
           vm_disk_size: "80G"
-          # Bridge network configuration (connects to physical network)
-          vm_bridge: "br0"
-          vm_bridge_interface: "enp10s0"
-          host_bridge_ip: "192.168.88.9"  # Static IP for host's bridge interface
           vm_packages: []
           vm_os_variant: "ubuntu24.04"
           vm_autostart: true
@@ -187,8 +170,6 @@ all:
           vm_disk_size: "80G"
           vm_autostart: true
           replicas: 3
-          # Network configuration
-          vm_bridge: "vmbr0"  # Proxmox bridge
           vm_mac_addresses:
             - "52:54:00:88:00:20"
             - "52:54:00:88:00:21"

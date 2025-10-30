@@ -37,18 +37,18 @@
         state: present
       tags: setup
 
-    - name: Ensure libvirtd service is running
-      systemd:
-        name: libvirtd
-        state: started
-        enabled: true
-      tags: setup
-
     - name: Add current user to libvirt group
       user:
         name: "{{ ansible_user_id }}"
         groups: libvirt
         append: true
+      tags: setup
+
+    - name: Ensure libvirtd service is running
+      systemd:
+        name: libvirtd
+        state: started
+        enabled: true
       tags: setup
 
     - name: Create base images directory
@@ -114,3 +114,159 @@
 
           Note: You may need to log out and back in for libvirt group membership to take effect.
       tags: setup
+
+    - name: Setup host bridge network if libvirt_bridge is defined
+      block:
+        - name: Check if bridge interface is configured
+          command: ip link show {{ libvirt_bridge }}
+          register: bridge_check
+          ignore_errors: true
+          changed_when: false
+
+        - name: Create netplan bridge configuration
+          copy:
+            dest: /etc/netplan/01-{{ libvirt_bridge }}.yaml
+            mode: '0600'
+            content: |
+              network:
+                version: 2
+                renderer: networkd
+                ethernets:
+                  {{ host_physical_interface }}:
+                    dhcp4: no
+                bridges:
+                  {{ libvirt_bridge }}:
+                    interfaces: [{{ host_physical_interface }}]
+              {% if host_bridge_ip is defined %}
+                    addresses: [{{ host_bridge_ip }}/24]
+                    dhcp4: true
+                    dhcp4-overrides:
+                      use-dns: true
+                      use-routes: true
+              {% else %}
+                    dhcp4: yes
+              {% endif %}
+          when:
+            - bridge_check.rc != 0
+            - host_physical_interface is defined
+
+        - name: Apply netplan configuration
+          command: netplan apply
+          when:
+            - bridge_check.rc != 0
+            - host_physical_interface is defined
+
+        - name: Wait for bridge to be available
+          command: ip link show {{ libvirt_bridge }}
+          register: bridge_ready
+          until: bridge_ready.rc == 0
+          retries: 10
+          delay: 2
+          changed_when: false
+          when:
+            - bridge_check.rc != 0
+            - host_physical_interface is defined
+
+        - name: Ensure /etc/qemu directory exists
+          file:
+            path: /etc/qemu
+            state: directory
+            mode: '0755'
+
+        - name: Create QEMU bridge configuration
+          copy:
+            dest: /etc/qemu/bridge.conf
+            mode: '0644'
+            content: |
+              # Allow QEMU to use bridge interfaces
+              allow {{ libvirt_bridge }}
+          notify: restart libvirtd
+
+        - name: Ensure qemu-bridge-helper has correct permissions
+          file:
+            path: /usr/lib/qemu/qemu-bridge-helper
+            mode: '4755'
+          ignore_errors: true  # May not exist on all systems
+      # when: libvirt_bridge is defined
+      tags: setup
+
+    - name: Cleanup bridge network and QEMU configuration
+      block:
+        - name: List all VMs using the bridge
+          shell: |
+            for vm in $(virsh -c {{ libvirt_uri | default('qemu:///session') }} list --all --name); do
+              [ -n "$vm" ] && virsh -c {{ libvirt_uri | default('qemu:///session') }} dumpxml "$vm" 2>/dev/null | grep -q "bridge='{{ libvirt_bridge }}'" && echo "$vm"
+            done
+          register: vms_using_bridge
+          changed_when: false
+          failed_when: false
+          become: false
+
+        - name: Check for VMs using the bridge
+          fail:
+            msg: |
+              Cannot cleanup bridge {{ libvirt_bridge }} - the following VMs are still using it:
+              {{ vms_using_bridge.stdout_lines | join('\n') }}
+
+              Please destroy all VMs using this bridge first:
+              {% for vm in vms_using_bridge.stdout_lines %}
+              - make ansible-destroy target_vm={{ vm }}
+              {% endfor %}
+          when: vms_using_bridge.stdout_lines | length > 0
+          become: false
+
+        - name: Check if netplan config exists
+          stat:
+            path: /etc/netplan/01-{{ libvirt_bridge }}.yaml
+          register: netplan_config_stat
+
+        - name: Remove netplan bridge configuration
+          file:
+            path: /etc/netplan/01-{{ libvirt_bridge }}.yaml
+            state: absent
+          when: netplan_config_stat.stat.exists
+
+        - name: Restore original interface configuration
+          copy:
+            dest: /etc/netplan/01-{{ host_physical_interface }}.yaml
+            mode: '0644'
+            content: |
+              network:
+                version: 2
+                renderer: networkd
+                ethernets:
+                  {{ host_physical_interface }}:
+                    dhcp4: yes
+          when:
+            - netplan_config_stat.stat.exists
+            - host_physical_interface is defined
+
+        - name: Remove QEMU bridge configuration
+          file:
+            path: /etc/qemu/bridge.conf
+            state: absent
+
+        - name: Apply netplan to remove bridge
+          command: netplan apply
+          when: netplan_config_stat.stat.exists
+
+        - name: Display cleanup completion message
+          pause:
+            echo: false
+            seconds: 1
+            prompt: |
+              ✅ Bridge network cleanup completed!
+
+              Removed:
+              - Bridge {{ libvirt_bridge }} from netplan
+              - Interface {{ host_physical_interface | default('unknown') }} restored to DHCP
+              - QEMU bridge configuration (/etc/qemu/bridge.conf)
+          become: false
+      when: ansible_run_tags | select('match', '^cleanup$') | list | length > 0
+      tags: cleanup
+
+  handlers:
+    - name: restart libvirtd
+      systemd:
+        name: libvirtd
+        state: restarted

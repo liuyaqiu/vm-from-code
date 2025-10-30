@@ -1,7 +1,7 @@
 ---
 - name: Destroy VM replicas
   hosts: libvirt_hosts
-  become: true
+  become: false
   gather_facts: false
 
   vars:

@@ -118,7 +118,7 @@
 
 - name: "Create cloud-init ISO for {{ replica_vm_name }}"
   command: >
-    genisoimage -output /var/lib/libvirt/images/{{ replica_vm_name }}-cloud-init.iso
+    genisoimage -output {{base_image_path}}/{{ replica_vm_name }}-cloud-init.iso
     -volid cidata -joliet -r
     /tmp/cloud-init-{{ replica_vm_name }}/user-data
     /tmp/cloud-init-{{ replica_vm_name }}/meta-data
@@ -143,14 +143,14 @@
   community.libvirt.virt:
     command: define
     xml: "{{ lookup('file', '/tmp/' + replica_vm_name + '.xml') }}"
-    uri: "{{ libvirt_uri | default('qemu:///system') }}"
+    uri: "{{ libvirt_uri | default('qemu:///session') }}"
   tags: define
 
 - name: "Set {{ replica_vm_name }} autostart"
   community.libvirt.virt:
     name: "{{ replica_vm_name }}"
     autostart: "{{ vm_config.vm_autostart | default(false) }}"
-    uri: "{{ libvirt_uri | default('qemu:///system') }}"
+    uri: "{{ libvirt_uri | default('qemu:///session') }}"
   tags: autostart
 
 - name: "Validate GPU passthrough setup for {{ replica_vm_name }} (if GPU VM)"
@@ -245,7 +245,7 @@
   community.libvirt.virt:
     name: "{{ replica_vm_name }}"
     state: running
-    uri: "{{ libvirt_uri | default('qemu:///system') }}"
+    uri: "{{ libvirt_uri | default('qemu:///session') }}"
   tags: start
 
 - name: "Display VM information for {{ replica_vm_name }}"

@@ -1,0 +1,151 @@
+---
+- name: List and get information about Proxmox VE VMs
+  hosts: localhost
+  gather_facts: false
+  become: false
+
+  vars_files:
+    - group_vars/all.yml
+    - group_vars/pve.yml
+
+  tasks:
+    - name: Verify PVE connectivity
+      uri:
+        url: "https://{{ pve_api_host }}:8006/api2/json/version"
+        method: GET
+        headers:
+          Authorization: "PVEAPIToken={{ pve_api_user }}!{{ pve_api_token_id }}={{ pve_api_token_secret }}"
+        validate_certs: false
+      register: pve_version
+      tags: [verify]
+
+    - name: Display PVE server information
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+
+          Proxmox VE Server: {{ pve_api_host }}
+          Version: {{ pve_version.json.data.version }}
+          Release: {{ pve_version.json.data.release }}
+
+      tags: info
+
+    - name: Get list of all VMs from PVE
+      uri:
+        url: "https://{{ pve_api_host }}:8006/api2/json/cluster/resources?type=vm"
+        method: GET
+        headers:
+          Authorization: "PVEAPIToken={{ pve_api_user }}!{{ pve_api_token_id }}={{ pve_api_token_secret }}"
+        validate_certs: false
+      register: pve_vms_response
+      tags: list
+
+    - name: Parse VM list
+      set_fact:
+        all_vms: "{{ pve_vms_response.json.data }}"
+        running_vms: "{{ pve_vms_response.json.data | selectattr('status', 'equalto', 'running') | list }}"
+        stopped_vms: "{{ pve_vms_response.json.data | selectattr('status', 'equalto', 'stopped') | list }}"
+      tags: list
+
+    - name: Get detailed information for each VM
+      uri:
+        url: "https://{{ pve_api_host }}:8006/api2/json/nodes/{{ item.node }}/qemu/{{ item.vmid }}/status/current"
+        method: GET
+        headers:
+          Authorization: "PVEAPIToken={{ pve_api_user }}!{{ pve_api_token_id }}={{ pve_api_token_secret }}"
+        validate_certs: false
+      register: vm_details_response
+      loop: "{{ all_vms }}"
+      when: all_vms | length > 0
+      tags: details
+
+    - name: Get VM configuration for each VM
+      uri:
+        url: "https://{{ pve_api_host }}:8006/api2/json/nodes/{{ item.node }}/qemu/{{ item.vmid }}/config"
+        method: GET
+        headers:
+          Authorization: "PVEAPIToken={{ pve_api_user }}!{{ pve_api_token_id }}={{ pve_api_token_secret }}"
+        validate_certs: false
+      register: vm_config_response
+      loop: "{{ all_vms }}"
+      when: all_vms | length > 0
+      tags: config
+
+    - name: Display VM summary
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+
+          ═══════════════════════════════════════════════════════════════════════
+          Proxmox VE VM Summary
+          ═══════════════════════════════════════════════════════════════════════
+
+          Total VMs: {{ all_vms | length }}
+          Running VMs: {{ running_vms | length }}
+          Stopped VMs: {{ stopped_vms | length }}
+
+          VM Details:
+          {% for vm in all_vms -%}
+          {% set vm_detail = vm_details_response.results[loop.index0].json.data -%}
+          {% set vm_config = vm_config_response.results[loop.index0].json.data -%}
+          ───────────────────────────────────────────────────────────────────────
+          Name:       {{ vm.name }}
+          VMID:       {{ vm.vmid }}
+          Node:       {{ vm.node }}
+          Status:     {{ vm.status | upper }}
+          Uptime:     {{ (vm_detail.uptime | default(0) / 86400) | round(2) }} days
+          CPU:        {{ vm.cpu | default(0) | round(2) }}% ({{ vm_config.cores | default(1) }} cores)
+          Memory:     {{ (vm_detail.mem | default(0) / 1024 / 1024 / 1024) | round(2) }} GB / {{ (vm_detail.maxmem | default(0) / 1024 / 1024 / 1024) | round(2) }} GB
+          Disk:       {{ (vm_detail.disk | default(0) / 1024 / 1024 / 1024) | round(2) }} GB / {{ (vm_detail.maxdisk | default(0) / 1024 / 1024 / 1024) | round(2) }} GB
+          Network:    {{ vm_config.net0.split(',')[0] if vm_config.net0 is defined else 'N/A' }}
+
+          {% endfor %}
+          ═══════════════════════════════════════════════════════════════════════
+
+      when: all_vms | length > 0
+      tags: summary
+
+    - name: Display message when no VMs exist
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+
+          No VMs found in Proxmox VE cluster.
+
+      when: all_vms | length == 0
+      tags: summary
+
+    - name: Get network information
+      uri:
+        url: "https://{{ pve_api_host }}:8006/api2/json/cluster/resources?type=storage"
+        method: GET
+        headers:
+          Authorization: "PVEAPIToken={{ pve_api_user }}!{{ pve_api_token_id }}={{ pve_api_token_secret }}"
+        validate_certs: false
+      register: pve_storage
+      tags: storage
+
+    - name: Display storage information
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+
+          ═══════════════════════════════════════════════════════════════════════
+          Storage Resources
+          ═══════════════════════════════════════════════════════════════════════
+          {% for storage in pve_storage.json.data %}
+          Storage:    {{ storage.storage }}
+          Node:       {{ storage.node }}
+          Type:       {{ storage.plugintype | default('N/A') }}
+          Status:     {{ storage.status | default('N/A') }}
+          Used:       {{ (storage.disk | default(0) / 1024 / 1024 / 1024) | round(2) }} GB / {{ (storage.maxdisk | default(0) / 1024 / 1024 / 1024) | round(2) }} GB
+          Available:  {{ ((storage.maxdisk | default(0) - storage.disk | default(0)) / 1024 / 1024 / 1024) | round(2) }} GB
+
+          {% endfor %}
+          ═══════════════════════════════════════════════════════════════════════
+
+      tags: storage

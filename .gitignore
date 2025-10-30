@@ -112,3 +112,4 @@ requirements.lock
 **/credentials
 **/artifacts
 
+libvirt-runtime/
