@@ -5,6 +5,7 @@ uv = "latest"
 [env]
 _.python.venv = { path = ".venv", create = true }
 UV_PROJECT_ENVIRONMENT = ".venv"
+_.file = '.env'
 
 # Task 1: Refresh the lock file
 [tasks.refresh-lock]

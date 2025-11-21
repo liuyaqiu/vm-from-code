@@ -10,6 +10,7 @@ REMOVED_NODES := nodename,nodename2
 MASTER_NODE := vagrant@192.168.88.10
 KUBECONFIG_PATH := $(INVENTORY_PATH)/artifacts/admin.conf
 CONFIGS := $(CURDIR)/configs
+EXPERIMENTS_PATH := $(CURDIR)/experiments
 
 .PHONY: help bash docker-build install add-node remove-node proxy
 
@@ -49,9 +50,12 @@ bash: docker-build
 	@echo "Starting Kubespray Docker container..."
 	@echo "Kubeconfig: $(KUBECONFIG_PATH)"
 	@echo "Using custom image: $(CUSTOM_IMAGE_NAME):$(CUSTOM_IMAGE_TAG)"
-	docker run --rm -it \
+	@echo "Experiments path: $(EXPERIMENTS_PATH)"
+	mkdir -p $(EXPERIMENTS_PATH)
+	docker run -w /root/experiments --rm -it \
 		--mount type=bind,source=$(KUBECONFIG_PATH),dst=/root/.kube/config \
 		--mount type=bind,source=$(CONFIGS),dst=/root/configs \
+		--mount type=bind,source=$(EXPERIMENTS_PATH),dst=/root/experiments \
 		$(CUSTOM_IMAGE_NAME):$(CUSTOM_IMAGE_TAG) bash
 
 # Run Kubespray cluster installation
