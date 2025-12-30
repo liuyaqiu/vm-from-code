@@ -134,10 +134,9 @@
     </rng>
 
 {% if vm_config.shared_folders is defined and vm_config.shared_folders | length > 0 %}
-    <!-- Shared folders (virtiofs) -->
 {% for folder in vm_config.shared_folders %}
     <filesystem type='mount' accessmode='passthrough'>
-      <driver type='virtiofs'/>
+      <driver type='path'/>
       <source dir='{{ folder.source }}'/>
       <target dir='{{ folder.tag }}'/>
     </filesystem>

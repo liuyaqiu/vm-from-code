@@ -129,9 +129,9 @@ all:
           vm_autostart: true
           replicas: 1
           vm_mac_addresses:
-            - "52:54:00:12:34:20"
+            - "52:54:00:12:34:30"
           vm_static_ips:
-            - "192.168.88.20"
+            - "192.168.88.30"
           # Gateway and DNS (explicitly configured in cloud-init)
           vm_gateway: "192.168.88.3"
           vm_nameservers:
@@ -152,7 +152,6 @@ all:
               name: "fastfetch-linux-amd64.deb"
           # Post-installation script (optional)
           post_install_script: "scripts/post-install.sh"
-          # Shared folders between host and VM (virtiofs)
           shared_folders:
             - source: "/home/liuyaqiu/code"
               target: "/home/vagrant/shared-folders/code"

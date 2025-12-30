@@ -77,14 +77,10 @@
           📋 VM Replica Creation Plan:
           Base VM: {{ target_vm }}
           Replicas: {{ replicas }}
-          {% if replicas | int > 1 %}
           Will create VMs:
           {% for i in range(replicas | int) %}
           - {{ vm_config.vm_name }}-{{ i }} (IP: {{ vm_config.vm_static_ips[i] }}, MAC: {{ vm_config.vm_mac_addresses[i] }})
           {% endfor %}
-          {% else %}
-          Will create single VM: {{ vm_config.vm_name }}
-          {% endif %}
 
     - name: Create replica VMs
       include_tasks: create-single-vm.yml
@@ -92,10 +88,10 @@
       loop_control:
         loop_var: replica_index
       vars:
-        replica_vm_name: "{{ vm_config.vm_name }}{% if replicas | int > 1 %}-{{ replica_index }}{% endif %}"
-        replica_hostname: "{{ vm_config.vm_hostname | default(vm_config.vm_name) }}{% if replicas | int > 1 %}-{{ replica_index }}{% endif %}"
-        replica_mac_address: "{% if replicas | int > 1 %}{{ vm_config.vm_mac_addresses[replica_index] }}{% else %}{{ vm_config.vm_mac_address }}{% endif %}"
-        replica_static_ip: "{% if replicas | int > 1 %}{{ vm_config.vm_static_ips[replica_index] }}{% else %}{{ vm_config.vm_static_ip }}{% endif %}"
+        replica_vm_name: "{{ vm_config.vm_name }}-{{ replica_index }}"
+        replica_hostname: "{{ vm_config.vm_hostname | default(vm_config.vm_name) }}-{{ replica_index }}"
+        replica_mac_address: "{{ vm_config.vm_mac_addresses[replica_index] }}"
+        replica_static_ip: "{{ vm_config.vm_static_ips[replica_index] }}"
 
     - name: Display completion summary
       pause:
@@ -104,18 +100,15 @@
         prompt: |
           ✅ All VM replicas created successfully!
 
-          {% if replicas | int > 1 %}
           Created VMs:
           {% for i in range(replicas | int) %}
           - {{ vm_config.vm_name }}-{{ i }}: ssh vagrant@{{ vm_config.vm_static_ips[i] }}
           {% endfor %}
 
           Quick access:
-          make ssh VM={{ target_vm }}@0  # SSH to first replica
-          make ssh VM={{ target_vm }}@1  # SSH to second replica
-          {% else %}
-          Created VM: {{ vm_config.vm_name }}
-          SSH: ssh vagrant@{{ vm_config.vm_static_ip }}
+          ssh vagrant@{{ vm_config.vm_static_ips[0] }}  # First replica
+          {% if replicas | int > 1 %}
+          ssh vagrant@{{ vm_config.vm_static_ips[1] }}  # Second replica
           {% endif %}
 
     # Post-deployment setup (NVIDIA, Docker, etc.)
@@ -123,7 +116,7 @@
       block:
         - name: Wait for VMs to be accessible via SSH
           wait_for:
-            host: "{% if replicas | int > 1 %}{{ vm_config.vm_static_ips[item] }}{% else %}{{ vm_config.vm_static_ip }}{% endif %}"
+            host: "{{ vm_config.vm_static_ips[item] }}"
             port: 22
             delay: 10
             timeout: 300
@@ -135,8 +128,8 @@
 
         - name: Add VMs to in-memory inventory for post-deployment tasks
           add_host:
-            name: "{% if replicas | int > 1 %}{{ vm_config.vm_name }}-{{ item }}{% else %}{{ vm_config.vm_name }}{% endif %}"
-            ansible_host: "{% if replicas | int > 1 %}{{ vm_config.vm_static_ips[item] }}{% else %}{{ vm_config.vm_static_ip }}{% endif %}"
+            name: "{{ vm_config.vm_name }}-{{ item }}"
+            ansible_host: "{{ vm_config.vm_static_ips[item] }}"
             ansible_user: "{{ vm_ssh_user }}"
             ansible_ssh_private_key_file: "{{ vm_ssh_key_path }}"
             ansible_ssh_common_args: "-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"

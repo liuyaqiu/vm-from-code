@@ -33,15 +33,10 @@
           Base VM: {{ target_vm }}
           PVE Node: {{ vm_config.pve_node }}
           Replicas: {{ replicas }}
-          {% if replicas | int > 1 %}
           Will destroy VMs:
           {% for i in range(replicas | int) %}
           - VMID {{ vm_config.pve_vmid_start | int + i }}: {{ vm_config.vm_name }}-{{ i }} (IP: {{ vm_config.vm_static_ips[i] }})
           {% endfor %}
-          {% else %}
-          Will destroy single VM:
-          - VMID {{ vm_config.pve_vmid_start }}: {{ vm_config.vm_name }} (IP: {{ vm_config.vm_static_ip }})
-          {% endif %}
 
           This action is IRREVERSIBLE!
 
@@ -61,7 +56,7 @@
       loop_control:
         loop_var: replica_index
       vars:
-        replica_vm_name: "{{ vm_config.vm_name }}{% if replicas | int > 1 %}-{{ replica_index }}{% endif %}"
+        replica_vm_name: "{{ vm_config.vm_name }}-{{ replica_index }}"
         replica_vmid: "{{ vm_config.pve_vmid_start | int + replica_index }}"
 
     - name: Display completion summary
@@ -71,12 +66,7 @@
         prompt: |
           ✅ All PVE VM replicas destroyed successfully!
 
-          {% if replicas | int > 1 %}
           Destroyed VMs:
           {% for i in range(replicas | int) %}
           - VMID {{ vm_config.pve_vmid_start | int + i }}: {{ vm_config.vm_name }}-{{ i }}
           {% endfor %}
-          {% else %}
-          Destroyed VM:
-          - VMID {{ vm_config.pve_vmid_start }}: {{ vm_config.vm_name }}
-          {% endif %}

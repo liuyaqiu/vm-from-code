@@ -17,14 +17,10 @@
           ⚠️  VM Destruction Plan:
           Base VM: {{ target_vm }}
           Replicas: {{ replicas }}
-          {% if replicas | int > 1 %}
           Will destroy VMs:
           {% for i in range(replicas | int) %}
           - {{ vm_config.vm_name }}-{{ i }}
           {% endfor %}
-          {% else %}
-          Will destroy VM: {{ vm_config.vm_name }}
-          {% endif %}
 
     - name: Destroy replica VMs
       include_tasks: destroy-single-vm.yml
@@ -32,7 +28,7 @@
       loop_control:
         loop_var: replica_index
       vars:
-        replica_vm_name: "{{ vm_config.vm_name }}{% if replicas | int > 1 %}-{{ replica_index }}{% endif %}"
+        replica_vm_name: "{{ vm_config.vm_name }}-{{ replica_index }}"
 
     - name: Remove base image (only when explicitly requested)
       file:
@@ -48,14 +44,10 @@
         prompt: |
           ✅ All VM replicas destroyed successfully!
 
-          {% if replicas | int > 1 %}
           Destroyed VMs:
           {% for i in range(replicas | int) %}
           - {{ vm_config.vm_name }}-{{ i }}
           {% endfor %}
-          {% else %}
-          Destroyed VM: {{ vm_config.vm_name }}
-          {% endif %}
 
           {% if cleanup_base_image | default(false) | bool %}
 
