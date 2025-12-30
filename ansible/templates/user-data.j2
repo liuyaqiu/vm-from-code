@@ -64,15 +64,61 @@ runcmd:
   - 'echo "Static IP configured: {{ config.vm_static_ip | default("192.168.122.30") }}"'
   - echo "Password authentication enabled for vagrant user"
   - systemctl restart ssh
-{% if vm_config.shared_folders is defined and vm_config.shared_folders | length > 0 %}
-{% for folder in vm_config.shared_folders %}
-  - mkdir -p {{ folder.target }}
-  - echo "{{ folder.tag }} {{ folder.target }} virtiofs rw,nofail 0 0" >> /etc/fstab
+{% if vm_config.custom_packages is defined and vm_config.custom_packages | length > 0 %}
+  # Install custom deb packages with retry logic
+  - echo "=== Installing custom packages ==="
+{% for package in vm_config.custom_packages %}
+  - |
+    # Download {{ package.name }} with retry (max 3 attempts)
+    for attempt in 1 2 3; do
+      echo "Attempt $attempt: Downloading {{ package.name }}..."
+      if wget -O /tmp/{{ package.name }} {{ package.url }}; then
+        echo "Download successful"
+        break
+      else
+        echo "Download failed"
+        if [ $attempt -lt 3 ]; then
+          echo "Waiting 15 seconds before retry..."
+          sleep 15
+        else
+          echo "Max retries reached, installation will fail"
+        fi
+      fi
+    done
+  - dpkg -i /tmp/{{ package.name }} || apt install -f -y
+  - rm -f /tmp/{{ package.name }}
 {% endfor %}
-  - mount -a
-{% for folder in vm_config.shared_folders %}
-  - chown vagrant:vagrant {{ folder.target }}
-{% endfor %}
+  - echo "=== Custom packages installation complete ==="
+{% endif %}
+{% if vm_config.install_docker | default(false) %}
+  # Install Docker and Docker Compose
+  - echo "=== Installing Docker ==="
+  - apt install -y ca-certificates curl
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo \"$VERSION_CODENAME\") stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null
+  - apt update
+  - apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - usermod -aG docker vagrant
+  - systemctl enable docker
+  - systemctl start docker
+  - echo "=== Docker installation complete ==="
+{% endif %}
+{% if vm_config.install_nvidia | default(false) %}
+  # Install NVIDIA driver and utils
+  - echo "=== Installing NVIDIA drivers ==="
+  - apt install -y linux-headers-$(uname -r)
+  - wget -O /tmp/cuda-keyring.deb https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2404/x86_64/cuda-keyring_1.1-1_all.deb
+  - dpkg -i /tmp/cuda-keyring.deb
+  - rm /tmp/cuda-keyring.deb
+  - apt update
+  - apt upgrade
+  - apt install -y nvidia-driver-pinning-590
+  - apt install -y libnvidia-compute
+  - apt install -y nvidia-dkms-open
+  - echo "=== NVIDIA driver installation complete (reboot required) ==="
+  - reboot
 {% endif %}
 
 # Final message

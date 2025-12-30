@@ -34,13 +34,13 @@ variable "cpus" {
 variable "source_image_url" {
   type        = string
   description = "URL to the Ubuntu 24.04 cloud image"
-  default     = "https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+  default     = "https://cloud-images.ubuntu.com/noble/20251213/noble-server-cloudimg-amd64.img"
 }
 
 variable "source_image_checksum" {
   type        = string
   description = "SHA256 checksum of the cloud image"
-  default     = "file:https://cloud-images.ubuntu.com/noble/current/SHA256SUMS"
+  default     = "file:https://cloud-images.ubuntu.com/noble/20251213/SHA256SUMS"
 }
 
 
@@ -110,11 +110,6 @@ build {
       "echo 'Checking network configuration...'",
       "ip addr show || ifconfig || echo 'Network info not available'"
     ]
-  }
-  
-  # Update system and install packages
-  provisioner "shell" {
-    script = "scripts/provision.sh"
   }
   
   # Reset cloud-init state and ensure NoCloud datasource is enabled

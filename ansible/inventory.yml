@@ -190,3 +190,32 @@ all:
             - url: "https://github.com/fastfetch-cli/fastfetch/releases/download/2.53.0/fastfetch-linux-amd64.deb"
               name: "fastfetch-linux-amd64.deb"
           post_install_script: "scripts/post-install.sh"
+
+        terraform-test:
+          vm_name: "terraform-test"
+          vm_hostname: "terraform-test"
+          vm_memory: 2048
+          vm_vcpus: 1
+          vm_disk_size: "20G"
+          vm_os_variant: "ubuntu24.04"
+          vm_autostart: true
+          gpu_passthrough: true
+          gpu_device_id: "0000:01:00.0"
+          install_nvidia: true
+          install_docker: true
+          replicas: 1  # Number of VM instances to create
+          vm_mac_addresses:
+            - "52:54:00:12:34:101"
+          vm_static_ips:
+            - "192.168.88.101"
+          # Gateway and DNS (explicitly configured in cloud-init)
+          vm_gateway: "192.168.88.3"
+          vm_nameservers:
+            - "192.168.88.3"
+          vm_packages: []
+          # Custom deb packages to install
+          custom_packages:
+            - url: "https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-amd64.deb"
+              name: "bazelisk-amd64.deb"
+            - url: "https://github.com/fastfetch-cli/fastfetch/releases/download/2.53.0/fastfetch-linux-amd64.deb"
+              name: "fastfetch-linux-amd64.deb"

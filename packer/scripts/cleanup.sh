@@ -52,6 +52,14 @@ echo "Regenerating SSH host keys..."
 sudo rm -f /etc/ssh/ssh_host_*
 sudo ssh-keygen -A
 
+# Disable password authentication for security (was enabled for Packer build)
+echo "Disabling SSH password authentication..."
+sudo sed -i 's/^PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+sudo sed -i 's/^#PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
+# Ensure it's set even if no existing entry
+grep -q "^PasswordAuthentication" /etc/ssh/sshd_config || echo "PasswordAuthentication no" | sudo tee -a /etc/ssh/sshd_config
+echo "Password authentication disabled - SSH key authentication required from now on"
+
 # Clear network configuration
 echo "Clearing network configuration..."
 sudo rm -f /etc/udev/rules.d/70-persistent-net.rules

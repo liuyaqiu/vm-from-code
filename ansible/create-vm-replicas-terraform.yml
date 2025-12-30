@@ -1,0 +1,142 @@
+---
+- name: Process VM replica configuration and create VMs using Terraform
+  hosts: libvirt_hosts
+  become: false
+  gather_facts: true
+
+  vars:
+    vm_config: "{{ hostvars[target_vm] }}"
+    replicas: "{{ vm_config.replicas | default(1) }}"
+
+  tasks:
+    - name: Create base images directory
+      file:
+        path: "{{ base_image_path }}"
+        state: directory
+        mode: '0755'
+      become: false
+      tags: setup
+
+    - name: Create secrets directory
+      file:
+        path: "../secrets"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      become: false
+      tags: setup
+
+    - name: Check if SSH key already exists
+      stat:
+        path: "{{ vm_ssh_key_path }}"
+      delegate_to: localhost
+      become: false
+      register: ssh_key_stat
+      tags: setup
+
+    - name: Generate ed25519 SSH key for VMs
+      command: >
+        ssh-keygen -t ed25519
+        -f {{ vm_ssh_key_path }}
+        -N ""
+        -C "libvirt-vms-key"
+      delegate_to: localhost
+      become: false
+      when: not ssh_key_stat.stat.exists
+      tags: setup
+
+    - name: Check if Terraform is installed
+      command: terraform version
+      register: terraform_check
+      changed_when: false
+      failed_when: false
+      tags: setup
+
+    - name: Display Terraform installation status
+      debug:
+        msg: "{{ terraform_check.stdout_lines }}"
+      when: terraform_check.rc == 0
+      tags: setup
+
+    - name: Fail if Terraform is not installed
+      fail:
+        msg: |
+          ❌ Terraform is not installed!
+
+          Please install Terraform before using this playbook:
+
+          On Ubuntu/Debian:
+            wget -O- https://apt.releases.hashicorp.com/gpg | sudo gpg --dearmor -o /usr/share/keyrings/hashicorp-archive-keyring.gpg
+            echo "deb [signed-by=/usr/share/keyrings/hashicorp-archive-keyring.gpg] https://apt.releases.hashicorp.com $(lsb_release -cs) main" | sudo tee /etc/apt/sources.list.d/hashicorp.list
+            sudo apt update && sudo apt install terraform
+
+          On macOS:
+            brew install terraform
+
+          Or download from: https://www.terraform.io/downloads
+      when: terraform_check.rc != 0
+      tags: setup
+
+    - name: Validate replica configuration
+      assert:
+        that:
+          - replicas | int > 0
+          - (vm_config.vm_mac_addresses | default([]) | length) == (replicas | int) or replicas == 1
+          - (vm_config.vm_static_ips | default([]) | length) == (replicas | int) or replicas == 1
+        fail_msg: |
+          Invalid replica configuration for {{ target_vm }}:
+          - replicas: {{ replicas }}
+          - vm_mac_addresses count: {{ vm_config.vm_mac_addresses | default([]) | length }}
+          - vm_static_ips count: {{ vm_config.vm_static_ips | default([]) | length }}
+
+          Please ensure:
+          1. replicas matches the number of MAC addresses
+          2. replicas matches the number of static IPs
+      when: replicas | int > 1
+
+    - name: Display replica creation plan
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          📋 VM Replica Creation Plan (via Terraform):
+          Base VM: {{ target_vm }}
+          Replicas: {{ replicas }}
+          Will create VMs:
+          {% for i in range(replicas | int) %}
+          - {{ vm_config.vm_name }}-{{ i }} (IP: {{ vm_config.vm_static_ips[i] }}, MAC: {{ vm_config.vm_mac_addresses[i] }})
+          {% endfor %}
+
+    - name: Create replica VMs using Terraform
+      include_tasks: create-single-vm-terraform.yml
+      loop: "{{ range(replicas | int) | list }}"
+      loop_control:
+        loop_var: replica_index
+      vars:
+        replica_vm_name: "{{ vm_config.vm_name }}-{{ replica_index }}"
+        replica_hostname: "{{ vm_config.vm_hostname | default(vm_config.vm_name) }}-{{ replica_index }}"
+        replica_mac_address: "{{ vm_config.vm_mac_addresses[replica_index] }}"
+        replica_static_ip: "{{ vm_config.vm_static_ips[replica_index] }}"
+
+    - name: Display completion summary
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ✅ All VM replicas created successfully via Terraform!
+
+          Created VMs:
+          {% for i in range(replicas | int) %}
+          - {{ vm_config.vm_name }}-{{ i }}: ssh vagrant@{{ vm_config.vm_static_ips[i] }}
+          {% endfor %}
+
+          Quick access:
+          ssh vagrant@{{ vm_config.vm_static_ips[0] }}  # First replica
+          {% if replicas | int > 1 %}
+          ssh vagrant@{{ vm_config.vm_static_ips[1] }}  # Second replica
+          {% endif %}
+
+          📁 Terraform configuration: terraform/{{ target_vm }}/
+          🗂️  Terraform state: terraform/{{ target_vm }}/terraform.tfstate
+
+          To destroy VMs: cd terraform/{{ target_vm }} && terraform destroy -auto-approve

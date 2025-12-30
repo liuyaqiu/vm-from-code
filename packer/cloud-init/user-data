@@ -23,7 +23,7 @@ ssh_pwauth: true
 
 # Package updates and installs (minimal for build)
 package_update: true
-package_upgrade: false  # Let provision.sh handle upgrades to avoid conflicts
+package_upgrade: true # Let provision.sh handle upgrades to avoid conflicts
 packages:
   - curl
   - wget
@@ -32,6 +32,15 @@ packages:
   - net-tools
   - iputils-ping
   - openssh-server
+  - dkms
+  - software-properties-common
+  - apt-transport-https
+  - ca-certificates
+  - gnupg
+  - lsb-release
+  - build-essential
+  - linux-headers-$(uname -r)
+  - linux-generic
 
 # No SSH configuration files in base image - let deployment handle this
 
