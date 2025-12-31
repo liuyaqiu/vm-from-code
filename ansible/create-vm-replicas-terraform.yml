@@ -53,8 +53,12 @@
       tags: setup
 
     - name: Display Terraform installation status
-      debug:
-        msg: "{{ terraform_check.stdout_lines }}"
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ✓ Terraform is installed:
+          {{ terraform_check.stdout }}
       when: terraform_check.rc == 0
       tags: setup
 
@@ -117,6 +121,56 @@
         replica_hostname: "{{ vm_config.vm_hostname | default(vm_config.vm_name) }}-{{ replica_index }}"
         replica_mac_address: "{{ vm_config.vm_mac_addresses[replica_index] }}"
         replica_static_ip: "{{ vm_config.vm_static_ips[replica_index] }}"
+
+    - name: "Initialize Terraform for {{ target_vm }}"
+      command: terraform init
+      args:
+        chdir: "terraform/{{ target_vm }}"
+      register: terraform_init
+      changed_when: "'Terraform has been successfully initialized' in terraform_init.stdout"
+      tags: terraform
+
+    - name: "Display Terraform init output for {{ target_vm }}"
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          🔧 Terraform init for {{ target_vm }}:
+          {{ terraform_init.stdout }}
+      tags: terraform
+
+    - name: "Validate Terraform configuration for {{ target_vm }}"
+      command: terraform validate
+      args:
+        chdir: "terraform/{{ target_vm }}"
+      register: terraform_validate
+      changed_when: false
+      tags: terraform
+
+    - name: "Display Terraform validate output for {{ target_vm }}"
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ✓ Terraform validate for {{ target_vm }}:
+          {{ terraform_validate.stdout }}
+      tags: terraform
+
+    - name: "Apply Terraform configuration for {{ target_vm }}"
+      command: terraform apply -auto-approve
+      args:
+        chdir: "terraform/{{ target_vm }}"
+      register: terraform_apply
+      tags: [terraform, apply]
+
+    - name: "Display Terraform apply output for {{ target_vm }}"
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          🚀 Terraform apply for {{ target_vm }}:
+          {{ terraform_apply.stdout }}
+      tags: [terraform, apply]
 
     - name: Display completion summary
       pause:

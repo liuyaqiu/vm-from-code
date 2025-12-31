@@ -67,7 +67,7 @@
           Please ensure:
           1. replicas matches the number of MAC addresses
           2. replicas matches the number of static IPs
-      when: replicas | int > 1
+      when: replicas | int > 0
 
     - name: Display replica creation plan
       pause:

@@ -17,6 +17,41 @@
   when: source_image_stat.stat.exists
   tags: image
 
+- name: "Get current disk info for {{ replica_vm_name }}"
+  command: qemu-img info --output json {{ base_image_path }}/{{ replica_vm_name }}.qcow2
+  register: disk_info
+  changed_when: false
+  tags: disk
+
+- name: "Parse disk info for {{ replica_vm_name }}"
+  set_fact:
+    current_virtual_size: "{{ (disk_info.stdout | from_json)['virtual-size'] }}"
+    target_size_bytes: "{{ vm_config.vm_disk_size | default(default_vm_disk_size) | regex_replace('G$', '') | int * 1024 * 1024 * 1024 }}"
+  tags: disk
+
+- name: "Resize VM disk for {{ replica_vm_name }} (only if target is larger)"
+  command: >
+    qemu-img resize
+    {{ base_image_path }}/{{ replica_vm_name }}.qcow2
+    {{ vm_config.vm_disk_size | default(default_vm_disk_size) }}
+  when: target_size_bytes | int > current_virtual_size | int
+  tags: disk
+
+- name: "Display disk size info for {{ replica_vm_name }}"
+  pause:
+    echo: false
+    seconds: 1
+    prompt: |
+      Disk for {{ replica_vm_name }}:
+      - Current size: {{ current_virtual_size | int / (1024*1024*1024) | round(2) }}GB
+      - Target size: {{ vm_config.vm_disk_size | default(default_vm_disk_size) }}
+      {% if target_size_bytes | int > current_virtual_size | int %}
+      - ✅ Disk resized to {{ vm_config.vm_disk_size | default(default_vm_disk_size) }}
+      {% else %}
+      - ℹ️  No resize needed (target <= current)
+      {% endif %}
+  tags: disk
+
 - name: "Create Terraform working directory for {{ replica_vm_name }}"
   file:
     path: "terraform/{{ target_vm }}"
@@ -132,60 +167,3 @@
       gpu_passthrough: "{{ vm_config.gpu_passthrough | default(false) }}"
       gpu_device_id: "{{ vm_config.gpu_device_id | default('') }}"
 
-- name: "Initialize Terraform for {{ target_vm }} (run once)"
-  command: terraform init
-  args:
-    chdir: "terraform/{{ target_vm }}"
-  register: terraform_init
-  changed_when: "'Terraform has been successfully initialized' in terraform_init.stdout"
-  when: replica_index == 0
-  tags: terraform
-
-- name: "Display Terraform init output for {{ target_vm }}"
-  debug:
-    msg: "{{ terraform_init.stdout_lines }}"
-  when: replica_index == 0
-  tags: terraform
-
-- name: "Validate Terraform configuration for {{ target_vm }} (run once)"
-  command: terraform validate
-  args:
-    chdir: "terraform/{{ target_vm }}"
-  register: terraform_validate
-  changed_when: false
-  when: replica_index == 0
-  tags: terraform
-
-- name: "Display Terraform validate output for {{ target_vm }}"
-  debug:
-    msg: "{{ terraform_validate.stdout_lines }}"
-  when: replica_index == 0
-  tags: terraform
-
-- name: "Apply Terraform configuration for {{ target_vm }}"
-  command: terraform apply -auto-approve
-  args:
-    chdir: "terraform/{{ target_vm }}"
-  register: terraform_apply
-  when: replica_index == 0
-  tags: [terraform, apply]
-
-- name: "Display Terraform apply output for {{ target_vm }}"
-  debug:
-    msg: "{{ terraform_apply.stdout_lines }}"
-  when: replica_index == 0
-  tags: [terraform, apply]
-
-- name: "Display VM information for {{ replica_vm_name }}"
-  pause:
-    echo: false
-    seconds: 1
-    prompt: |
-      ✅ VM '{{ replica_vm_name }}' has been created and started via Terraform.
-      IP: {{ replica_static_ip }}
-      Connect via VNC: virt-viewer {{ replica_vm_name }}
-      Or use SSH once the VM is fully booted: ssh {{ vm_ssh_user }}@{{ replica_static_ip }}
-
-      Terraform state: terraform/{{ target_vm }}/
-  tags: info
-  when: replica_index == 0

@@ -116,6 +116,16 @@ resource "libvirt_domain" "{{ config.vm_name }}" {
             bridge = "{{ libvirt_bridge }}"
           }
         }
+        # NOTE: PCI address for interface - this forces interface to bus 01
+        # This is necessary to avoid conflict with filesystem device on bus 02
+        address = {
+          pci = {
+            domain = 0
+            bus = 1
+            slot = 0
+            function = 0
+          }
+        }
       }
     ]
 
@@ -146,6 +156,34 @@ resource "libvirt_domain" "{{ config.vm_name }}" {
     rng = {
       model = "virtio"
     }
+{% if vm_config.shared_folders is defined and vm_config.shared_folders | length > 0 %}
+
+    filesystems = [
+{% for folder in vm_config.shared_folders %}
+      {
+        source = {
+          mount = {
+            dir = "{{ folder.source }}"
+          }
+        }
+        target = {
+          dir = "{{ folder.tag }}"
+        }
+        access_mode = "passthrough"
+        # NOTE: PCI address for filesystem - place on bus 02+ to avoid conflict with network on bus 01
+        address = {
+          pci = {
+            domain = 0
+            bus = {{ loop.index + 1 }}  # Start from bus 0x02 (0x01 is reserved for network)
+            slot = 0
+            function = 0
+          }
+        }
+      }{% if not loop.last %},{% endif %}
+
+{% endfor %}
+    ]
+{% endif %}
 {% if config.gpu_passthrough | default(false) %}
 
     hostdevs = [

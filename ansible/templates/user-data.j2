@@ -64,6 +64,24 @@ runcmd:
   - 'echo "Static IP configured: {{ config.vm_static_ip | default("192.168.122.30") }}"'
   - echo "Password authentication enabled for vagrant user"
   - systemctl restart ssh
+{% if vm_config.shared_folders is defined and vm_config.shared_folders | length > 0 %}
+  # Setup shared folders with virtio-9p
+  - echo "=== Setting up shared folders ==="
+{% for folder in vm_config.shared_folders %}
+  # Create mount point for {{ folder.tag }}
+  - mkdir -p {{ folder.target }}
+  - chown vagrant:vagrant {{ folder.target }}
+  # Add fstab entry for {{ folder.tag }}
+  - |
+    if ! grep -q "{{ folder.tag }}" /etc/fstab; then
+      echo "{{ folder.tag }}   {{ folder.target }}   9p   trans=virtio,version=9p2000.L,rw,_netdev   0   0" >> /etc/fstab
+    fi
+{% endfor %}
+  # Apply mounts
+  - systemctl daemon-reload
+  - mount -a
+  - echo "=== Shared folders setup complete ==="
+{% endif %}
 {% if vm_config.custom_packages is defined and vm_config.custom_packages | length > 0 %}
   # Install custom deb packages with retry logic
   - echo "=== Installing custom packages ==="
@@ -117,7 +135,12 @@ runcmd:
   - apt install -y nvidia-driver-pinning-590
   - apt install -y libnvidia-compute
   - apt install -y nvidia-dkms-open
-  - apt install -y install cuda-toolkit-13-1
+  - apt install -y cuda-toolkit-13-1
+  - |
+    # Add CUDA to PATH and LD_LIBRARY_PATH for vagrant user
+    echo 'export PATH="/usr/local/cuda/bin:$PATH"' >> /home/vagrant/.bashrc
+    echo 'export LD_LIBRARY_PATH="/usr/local/cuda/lib64:$LD_LIBRARY_PATH"' >> /home/vagrant/.bashrc
+    chown vagrant:vagrant /home/vagrant/.bashrc
   - echo "=== NVIDIA driver installation complete (reboot required) ==="
   - reboot
 {% endif %}

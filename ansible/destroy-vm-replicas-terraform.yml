@@ -1,0 +1,98 @@
+---
+- name: Destroy Terraform-managed VM replicas
+  hosts: libvirt_hosts
+  become: false
+  gather_facts: false
+
+  vars:
+    vm_config: "{{ hostvars[target_vm] }}"
+    replicas: "{{ vm_config.replicas | default(1) }}"
+    terraform_dir: "terraform/{{ target_vm }}"
+
+  tasks:
+    - name: Check if Terraform directory exists
+      stat:
+        path: "{{ terraform_dir }}"
+      register: terraform_dir_stat
+      delegate_to: localhost
+
+    - name: Fail if Terraform directory doesn't exist
+      fail:
+        msg: |
+          Terraform directory not found: {{ terraform_dir }}
+          VMs may not have been created yet or directory was already deleted.
+      when: not terraform_dir_stat.stat.exists
+
+    - name: Display destruction plan
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ⚠️  VM Destruction Plan (Terraform):
+          Base VM: {{ target_vm }}
+          Replicas: {{ replicas }}
+          Will destroy VMs:
+          {% for i in range(replicas | int) %}
+          - {{ vm_config.vm_name }}-{{ i }}
+          {% endfor %}
+
+          Terraform will destroy:
+          - Libvirt domains (VMs)
+          - Cloud-init ISOs
+          - Terraform state
+
+          Manual cleanup required for:
+          - VM disk images ({{ base_image_path }}/{{ vm_config.vm_name }}-*.qcow2)
+
+    - name: Run terraform destroy
+      command:
+        cmd: terraform destroy -auto-approve
+        chdir: "{{ terraform_dir }}"
+      register: terraform_destroy_result
+      delegate_to: localhost
+      changed_when: true
+
+    - name: Display terraform destroy output
+      debug:
+        var: terraform_destroy_result.stdout_lines
+      when: terraform_destroy_result.stdout_lines is defined
+
+    - name: Clean up unmanaged resources for each replica
+      include_tasks: destroy-single-vm-terraform.yml
+      loop: "{{ range(replicas | int) | list }}"
+      loop_control:
+        loop_var: replica_index
+      vars:
+        replica_vm_name: "{{ vm_config.vm_name }}-{{ replica_index }}"
+
+    - name: Display terraform directory preservation notice
+      debug:
+        msg: |
+          Terraform configuration preserved at: {{ terraform_dir }}/
+          - .terraform/ (provider plugins)
+          - .terraform.lock.hcl (lock file)
+          - *.tf (terraform configuration files)
+
+          You can recreate VMs using: make create VM={{ target_vm }}
+
+    - name: Display completion summary
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ✅ All Terraform-managed VM replicas destroyed successfully!
+
+          Destroyed VMs:
+          {% for i in range(replicas | int) %}
+          - {{ vm_config.vm_name }}-{{ i }}
+          {% endfor %}
+
+          Cleaned up:
+          - Libvirt domains (VMs) - via Terraform
+          - Cloud-init ISOs - via Terraform
+          - VM disk images ({{ replicas }} file(s))
+          - XML backup files
+
+          📁 Terraform configuration preserved: {{ terraform_dir }}/
+
+          To recreate VMs: make create VM={{ target_vm }}

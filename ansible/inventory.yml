@@ -137,21 +137,21 @@ all:
           vm_nameservers:
             - "192.168.88.3"
           # NVIDIA RTX A6000 GPU passthrough (uncomment when needed)
-          gpu_passthrough: true # Change to true when GPU is configured
-          gpu_device_id: "0000:01:00.0"
+          # gpu_passthrough: true # Change to true when GPU is configured
+          # gpu_device_id: "0000:01:00.0"
           # NVIDIA driver and CUDA installation
-          install_nvidia: true
-          cuda_version: "13.0"
-          # Docker Engine installation
-          install_docker: true
+          # install_nvidia: true
+          # cuda_version: "13.0"
+          # # Docker Engine installation
+          # install_docker: true
           # Custom deb packages to install
-          custom_packages:
-            - url: "https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-amd64.deb"
-              name: "bazelisk-amd64.deb"
-            - url: "https://github.com/fastfetch-cli/fastfetch/releases/download/2.53.0/fastfetch-linux-amd64.deb"
-              name: "fastfetch-linux-amd64.deb"
+          # custom_packages:
+          #   - url: "https://github.com/bazelbuild/bazelisk/releases/download/v1.27.0/bazelisk-amd64.deb"
+          #     name: "bazelisk-amd64.deb"
+          #   - url: "https://github.com/fastfetch-cli/fastfetch/releases/download/2.53.0/fastfetch-linux-amd64.deb"
+          #     name: "fastfetch-linux-amd64.deb"
           # Post-installation script (optional)
-          post_install_script: "scripts/post-install.sh"
+          # post_install_script: "scripts/post-install.sh"
           shared_folders:
             - source: "/home/liuyaqiu/code"
               target: "/home/vagrant/shared-folders/code"
@@ -191,22 +191,27 @@ all:
           post_install_script: "scripts/post-install.sh"
 
         terraform-test:
+          provisioner: terraform
           vm_name: "terraform-test"
           vm_hostname: "terraform-test"
           vm_memory: 2048
           vm_vcpus: 1
-          vm_disk_size: "20G"
+          vm_disk_size: "30G"
           vm_os_variant: "ubuntu24.04"
           vm_autostart: true
-          gpu_passthrough: true
-          gpu_device_id: "0000:01:00.0"
-          install_nvidia: true
-          install_docker: true
-          replicas: 1  # Number of VM instances to create
+          # gpu_passthrough: true
+          # gpu_device_id: "0000:01:00.0"
+          # install_nvidia: true
+          # install_docker: true
+          replicas: 3  # Number of VM instances to create
           vm_mac_addresses:
-            - "52:54:00:12:34:101"
+            - "52:54:00:12:34:41"
+            - "52:54:00:12:34:42"
+            - "52:54:00:12:34:43"
           vm_static_ips:
-            - "192.168.88.101"
+            - "192.168.88.41"
+            - "192.168.88.42"
+            - "192.168.88.43"
           # Gateway and DNS (explicitly configured in cloud-init)
           vm_gateway: "192.168.88.3"
           vm_nameservers:
@@ -218,3 +223,7 @@ all:
               name: "bazelisk-amd64.deb"
             - url: "https://github.com/fastfetch-cli/fastfetch/releases/download/2.53.0/fastfetch-linux-amd64.deb"
               name: "fastfetch-linux-amd64.deb"
+          shared_folders:
+            - source: "/home/liuyaqiu/code"
+              target: "/home/vagrant/shared-folders/code"
+              tag: "code"

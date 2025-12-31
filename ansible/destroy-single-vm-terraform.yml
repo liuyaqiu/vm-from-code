@@ -1,0 +1,54 @@
+---
+# This task file destroys a single Terraform-managed VM instance
+# Called by destroy-vm-replicas-terraform.yml for each replica
+# Note: This only handles cleanup of unmanaged resources (disk files)
+# Terraform itself manages the VMs through its state
+
+- name: "Check if VM disk {{ replica_vm_name }}.qcow2 exists"
+  stat:
+    path: "{{ base_image_path }}/{{ replica_vm_name }}.qcow2"
+  register: vm_disk_stat
+
+- name: "Remove VM disk {{ replica_vm_name }}.qcow2"
+  file:
+    path: "{{ base_image_path }}/{{ replica_vm_name }}.qcow2"
+    state: absent
+  when: vm_disk_stat.stat.exists
+  tags: cleanup
+
+- name: "Check if XML backup {{ replica_vm_name }}.xml exists in terraform directory"
+  stat:
+    path: "{{ terraform_dir }}/{{ replica_vm_name }}.xml"
+  register: xml_backup_stat
+  delegate_to: localhost
+
+- name: "Remove XML backup {{ replica_vm_name }}.xml"
+  file:
+    path: "{{ terraform_dir }}/{{ replica_vm_name }}.xml"
+    state: absent
+  when: xml_backup_stat.stat.exists
+  delegate_to: localhost
+  tags: cleanup
+
+- name: "Check if fixed XML backup {{ replica_vm_name }}_fixed.xml exists"
+  stat:
+    path: "{{ terraform_dir }}/{{ replica_vm_name }}_fixed.xml"
+  register: fixed_xml_stat
+  delegate_to: localhost
+
+- name: "Remove fixed XML backup {{ replica_vm_name }}_fixed.xml"
+  file:
+    path: "{{ terraform_dir }}/{{ replica_vm_name }}_fixed.xml"
+    state: absent
+  when: fixed_xml_stat.stat.exists
+  delegate_to: localhost
+  tags: cleanup
+
+- name: "Display cleanup status for {{ replica_vm_name }}"
+  debug:
+    msg: |
+      Cleaned up unmanaged resources for {{ replica_vm_name }}:
+      - Disk file: {{ 'removed' if vm_disk_stat.stat.exists else 'not found' }}
+      - XML backup: {{ 'removed' if xml_backup_stat.stat.exists else 'not found' }}
+      - Fixed XML backup: {{ 'removed' if fixed_xml_stat.stat.exists else 'not found' }}
+  tags: info

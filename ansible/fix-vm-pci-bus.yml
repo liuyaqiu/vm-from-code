@@ -1,0 +1,291 @@
+---
+# Manual fix playbook for PCI bus ordering issue
+# This playbook fixes the issue where filesystem device gets bus 0x01
+# and network interface gets bus 0x02, causing network to not work.
+#
+# Usage: ansible-playbook -i inventory.yml fix-vm-pci-bus.yml -e target_vm=terraform-test -e replica_index=0
+
+- name: Fix VM PCI bus ordering
+  hosts: localhost
+  gather_facts: yes
+  become: no
+
+  vars:
+    replica_vm_name: "{{ target_vm }}-{{ replica_index }}"
+    terraform_dir: "terraform/{{ target_vm }}"
+    xml_backup_dir: "{{ terraform_dir }}"
+    original_xml: "{{ xml_backup_dir }}/{{ replica_vm_name }}.xml"
+    fixed_xml: "{{ xml_backup_dir }}/{{ replica_vm_name }}_fixed.xml"
+
+  tasks:
+    - name: "Check if VM {{ replica_vm_name }} exists"
+      command: virsh -c qemu:///session list --all --name
+      register: vm_list
+      changed_when: false
+
+    - name: "Fail if VM doesn't exist"
+      fail:
+        msg: "VM {{ replica_vm_name }} does not exist. Please create it first using terraform."
+      when: replica_vm_name not in vm_list.stdout_lines
+
+    - name: "Dump XML configuration for {{ replica_vm_name }}"
+      command: >
+        virsh -c qemu:///session dumpxml {{ replica_vm_name }}
+      register: vm_xml_content
+      changed_when: false
+
+    - name: "Save original XML to {{ original_xml }}"
+      copy:
+        content: "{{ vm_xml_content.stdout }}"
+        dest: "{{ original_xml }}"
+        mode: '0644'
+
+    - name: "Display original XML location"
+      debug:
+        msg: "Original VM XML saved to: {{ original_xml }}"
+
+    - name: "Check if PCI bus fix is needed"
+      shell: |
+        python3 << 'PYTHON_SCRIPT'
+        import sys
+        import xml.etree.ElementTree as ET
+
+        # Parse XML
+        tree = ET.parse('{{ original_xml }}')
+        root = tree.getroot()
+
+        # Find all devices
+        devices = root.find('devices')
+        if devices is None:
+            print("ERROR: No devices found", file=sys.stderr)
+            sys.exit(1)
+
+        interface = devices.find('interface')
+
+        if interface is None:
+            print("ERROR: Interface not found", file=sys.stderr)
+            sys.exit(1)
+
+        # Get current addresses
+        if_address = interface.find('address')
+
+        if if_address is None:
+            print("ERROR: Address elements not found", file=sys.stderr)
+            sys.exit(1)
+
+        # Check interface bus
+        if_bus = if_address.get('bus')
+
+        if if_bus == '0x01':
+            print("ALREADY_FIXED")
+        else:
+            print(f"NEEDS_FIX:if_bus={if_bus}")
+        PYTHON_SCRIPT
+      register: check_result
+      args:
+        executable: /bin/bash
+      changed_when: false
+      failed_when: check_result.rc != 0
+
+    - name: "Display check result"
+      debug:
+        msg: "{{ check_result.stdout }}"
+
+    - name: "Display skip message if no fix needed"
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ℹ️  No PCI bus fix needed for '{{ replica_vm_name }}'.
+
+          {% if 'ALREADY_FIXED' in check_result.stdout %}
+          ✅ Network interface is already on PCI bus 0x01.
+          {% elif 'NO_FILESYSTEM' in check_result.stdout %}
+          ℹ️  VM has no filesystem devices to fix.
+          {% endif %}
+
+          VM XML: {{ original_xml }}
+      when: >
+        'ALREADY_FIXED' in check_result.stdout or
+        'NO_FILESYSTEM' in check_result.stdout
+
+    - name: "Skip fix if already correct or no filesystem"
+      meta: end_play
+      when: >
+        'ALREADY_FIXED' in check_result.stdout or
+        'NO_FILESYSTEM' in check_result.stdout
+
+    - name: "Check if VM is running"
+      command: virsh -c qemu:///session domstate {{ replica_vm_name }}
+      register: vm_state
+      changed_when: false
+
+    - name: "Destroy (stop) VM {{ replica_vm_name }} if running"
+      command: virsh -c qemu:///session destroy {{ replica_vm_name }}
+      when: vm_state.stdout == "running"
+
+    - name: "Undefine VM {{ replica_vm_name }} from libvirt"
+      command: >
+        virsh -c qemu:///session undefine {{ replica_vm_name }}
+        --nvram
+      register: undefine_result
+      failed_when: false
+
+    - name: "Delete VM disk image if it still exists"
+      file:
+        path: "{{ base_image_path }}/{{ replica_vm_name }}.qcow2"
+        state: absent
+
+    - name: "Display cleanup status"
+      debug:
+        msg: "VM {{ replica_vm_name }} has been undefined and disk deleted"
+
+    - name: "Create fixed XML by swapping PCI bus addresses"
+      shell: |
+        # Read the original XML
+        cat {{ original_xml }} | \
+        # Use Python to parse and fix the XML
+        python3 << 'PYTHON_SCRIPT'
+        import sys
+        import xml.etree.ElementTree as ET
+
+        # Parse XML from stdin
+        tree = ET.parse('{{ original_xml }}')
+        root = tree.getroot()
+
+        # Find all devices
+        devices = root.find('devices')
+        if devices is None:
+            print("No devices found", file=sys.stderr)
+            sys.exit(1)
+
+        # Find interface element
+        interface = devices.find('interface')
+
+        if interface is None:
+            print("Interface not found", file=sys.stderr)
+            sys.exit(1)
+
+        # Get interface address
+        if_address = interface.find('address')
+        if if_address is None:
+            print("Interface address not found", file=sys.stderr)
+            sys.exit(1)
+
+        # Get current interface bus
+        if_bus = if_address.get('bus')
+
+        # Check if interface is already on bus 0x01
+        if if_bus == '0x01':
+            print("Interface already on bus 0x01, no fix needed")
+            sys.exit(0)
+
+        if_bus = int(if_bus, 16)
+
+        # Network interface should be on bus 0x01
+        # All other devices with bus >= 0x01 need to be incremented
+
+        # Find all devices with PCI addresses
+        all_devices = []
+        for device in devices:
+            address = device.find('address')
+            if address is not None and address.get('type') == 'pci':
+                bus = address.get('bus')
+                if bus:
+                    all_devices.append((device, address, bus))
+
+        # Increment bus numbers for all devices with bus >= 0x01 (except the interface)
+        for device, address, bus in all_devices:
+            if device.tag != 'interface':
+                bus_int = int(bus, 16)
+                if 0x01 <= bus_int < if_bus:
+                    new_bus = hex(bus_int + 1)
+                    address.set('bus', new_bus)
+                    print(f"Incremented {device.tag} bus from {bus} to {new_bus}")
+
+        # Set interface to bus 0x01
+        if_address.set('bus', '0x01')
+        print(f"Set interface bus from {if_bus} to 0x01")
+
+        # Write the modified XML
+        tree.write('{{ fixed_xml }}', encoding='unicode', xml_declaration=True)
+        print("Fixed XML written successfully")
+        PYTHON_SCRIPT
+      register: fix_xml_result
+      args:
+        executable: /bin/bash
+
+    - name: "Display XML fix result"
+      debug:
+        msg: "{{ fix_xml_result.stdout }}"
+
+    - name: "Verify fixed XML was created"
+      stat:
+        path: "{{ fixed_xml }}"
+      register: fixed_xml_stat
+
+    - name: "Fail if fixed XML doesn't exist"
+      fail:
+        msg: "Failed to create fixed XML at {{ fixed_xml }}"
+      when: not fixed_xml_stat.stat.exists
+
+    - name: "Read source image path from group_vars"
+      set_fact:
+        vm_config: "{{ hostvars[target_vm] }}"
+
+    - name: "Copy source image to create new VM disk"
+      copy:
+        src: "{{ source_image_path }}"
+        dest: "{{ base_image_path }}/{{ replica_vm_name }}.qcow2"
+        mode: '0644'
+        remote_src: true
+
+    - name: "Get current disk info"
+      command: qemu-img info --output json {{ base_image_path }}/{{ replica_vm_name }}.qcow2
+      register: disk_info
+      changed_when: false
+
+    - name: "Parse disk size"
+      set_fact:
+        current_virtual_size: "{{ (disk_info.stdout | from_json)['virtual-size'] }}"
+        target_size_bytes: "{{ vm_config.vm_disk_size | default(default_vm_disk_size) | regex_replace('G$', '') | int * 1024 * 1024 * 1024 }}"
+
+    - name: "Resize VM disk if needed"
+      command: >
+        qemu-img resize
+        {{ base_image_path }}/{{ replica_vm_name }}.qcow2
+        {{ vm_config.vm_disk_size | default(default_vm_disk_size) }}
+      when: target_size_bytes | int > current_virtual_size | int
+
+    - name: "Define VM with fixed XML"
+      command: virsh -c qemu:///session define {{ fixed_xml }}
+      register: define_result
+
+    - name: "Display define result"
+      debug:
+        msg: "{{ define_result.stdout }}"
+
+    - name: "Start VM {{ replica_vm_name }}"
+      command: virsh -c qemu:///session start {{ replica_vm_name }}
+      register: start_result
+
+    - name: "Display start result"
+      debug:
+        msg: "{{ start_result.stdout }}"
+
+    - name: "Display success message"
+      pause:
+        echo: false
+        seconds: 1
+        prompt: |
+          ✅ VM '{{ replica_vm_name }}' has been fixed and restarted!
+
+          Fixed XML saved to: {{ fixed_xml }}
+          Original XML saved to: {{ original_xml }}
+
+          PCI bus changes:
+          - Network interface: moved to bus 0x01
+          - All other devices with bus >= 0x01: incremented by 1
+
+          The VM should now have working network connectivity.
+          Test with: ssh {{ vm_ssh_user }}@{{ vm_config.vm_static_ips[replica_index | int] }}
